@@ -12,13 +12,11 @@ service cloud.firestore {
     }
 
     // Admin authorization check:
-    // Strictly determined from Firestore users/{uid}.role == 'admin' or verified store owner email
+    // Strictly determined from Firestore users/{uid}.data.role == 'admin'
     function isAdmin() {
-      return isSignedIn() && (
-        (request.auth.token.email == "bajajmotors.chu@gmail.com") ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
-      );
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
     // Default deny catch-all
@@ -33,16 +31,18 @@ service cloud.firestore {
       allow list: if isAdmin();
 
       // Creation: customer can create their own profile with role == 'customer'
-      // Customer cannot self-assign role == 'admin'
+      // The store owner (bajajmotors.chu@gmail.com) can initialize their admin profile document
+      // Existing admin can create any user profile
       allow create: if isSignedIn() && (
         (isOwner(userId) && (
-          !('role' in request.resource.data) || 
-          request.resource.data.role == 'customer'
+          request.resource.data.role == 'customer' ||
+          (request.auth.token.email == "bajajmotors.chu@gmail.com" && request.resource.data.role == 'admin')
         )) ||
         isAdmin()
       );
 
       // Update: user can update own profile, but CANNOT escalate role to 'admin'
+      // Existing admin can update any user profile
       allow update: if isSignedIn() && (
         (isOwner(userId) && (
           !('role' in request.resource.data) || 
@@ -65,11 +65,8 @@ service cloud.firestore {
     // ----------------- ORDERS COLLECTION -----------------
     // Customer can create order and read their own orders; Admin can read and manage all
     match /orders/{orderId} {
-      allow read: if isAdmin()
-                  || (
-                    isSignedIn()
-                    && resource.data.customerId == request.auth.uid
-                  );
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
 
       allow create: if isSignedIn()
                     && request.resource.data.customerId == request.auth.uid;

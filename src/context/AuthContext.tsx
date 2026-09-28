@@ -86,90 +86,112 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           // Read users/{uid} document strictly from Firestore
           const userDocRef = doc(db, 'users', currentFbUser.uid);
-          const userSnap = await getDoc(userDocRef);
+          let userSnap = await getDoc(userDocRef);
 
-          const isPrimaryAdmin = currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
-          let userRole: 'customer' | 'admin' = isPrimaryAdmin ? 'admin' : 'customer';
-          let userName = currentFbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer');
-          let userPhone = currentFbUser.phoneNumber || '';
-          let userAddress = undefined;
+          console.log('Firebase Auth State Changed:');
+          console.log('  UID:', currentFbUser.uid);
+          console.log('  Email:', currentFbUser.email);
+          console.log('  Firestore Doc Exists:', userSnap.exists());
+
+          if (!userSnap.exists()) {
+            // Profile document does not exist yet.
+            // If primary store admin email logs in, provision their admin profile document.
+            // Otherwise, default role is strictly 'customer'.
+            const isStoreAdminEmail = currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+            const initialRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
+
+            const newDocData = {
+              uid: currentFbUser.uid,
+              name: currentFbUser.displayName || (isStoreAdminEmail ? 'Store Administrator' : 'Customer'),
+              email: currentFbUser.email || '',
+              phone: currentFbUser.phoneNumber || '',
+              role: initialRole,
+              createdAt: serverTimestamp(),
+            };
+
+            try {
+              await setDoc(userDocRef, newDocData);
+              console.log(`✅ Successfully initialized Firestore users/{uid} with role [${initialRole}]:`, currentFbUser.uid);
+            } catch (createErr) {
+              console.error('❌ Failed to create user document in Firestore:', createErr);
+            }
+
+            userSnap = await getDoc(userDocRef);
+          }
 
           if (userSnap.exists()) {
             const data = userSnap.data();
-            // Source of Truth: data.role === 'admin' OR verified primary admin email
-            userRole = (data.role === 'admin' || isPrimaryAdmin) ? 'admin' : 'customer';
-            userName = data.name || currentFbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer');
-            userPhone = data.phone || currentFbUser.phoneNumber || '';
-            userAddress = data.address;
+            // Source of Truth: data.role === 'admin' strictly from Firestore
+            let firestoreRole: 'customer' | 'admin' = data.role === 'admin' ? 'admin' : 'customer';
 
-            // Ensure primary admin role is synced to Firestore
-            if (isPrimaryAdmin && data.role !== 'admin') {
+            // If the designated store owner email has a document without role: 'admin', sync it
+            if (currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL && data.role !== 'admin') {
               try {
                 await updateDoc(userDocRef, { role: 'admin', updatedAt: serverTimestamp() });
-              } catch (e) {
-                console.warn('Syncing primary admin role to Firestore:', e);
+                firestoreRole = 'admin';
+                console.log('✅ Synchronized admin role to Firestore for primary store owner');
+              } catch (upErr) {
+                console.warn('Syncing admin role to Firestore notice:', upErr);
               }
             }
+
+            console.log('  Verified Firestore Role:', firestoreRole);
+
+            const verifiedUser: User = {
+              id: currentFbUser.uid,
+              name: data.name || currentFbUser.displayName || (firestoreRole === 'admin' ? 'Store Administrator' : 'Customer'),
+              email: currentFbUser.email || data.email || '',
+              phone: data.phone || currentFbUser.phoneNumber || '',
+              role: firestoreRole,
+              address: data.address,
+            };
+
+            setUser(verifiedUser);
+            storageService.saveUser(verifiedUser);
+
+            // Real-time listener on user's Firestore document
+            unsubscribeUserDoc = onSnapshot(userDocRef, (docSnap) => {
+              if (docSnap.exists()) {
+                const liveData = docSnap.data();
+                const liveRole: 'customer' | 'admin' = liveData.role === 'admin' ? 'admin' : 'customer';
+
+                setUser((prev) => {
+                  if (!prev) return null;
+                  const updated: User = {
+                    ...prev,
+                    role: liveRole,
+                    name: liveData.name || prev.name,
+                    phone: liveData.phone || prev.phone,
+                    address: liveData.address || prev.address,
+                  };
+                  storageService.saveUser(updated);
+                  return updated;
+                });
+              }
+            }, (error) => {
+              console.warn('Real-time user document listener notice:', error.message);
+            });
           } else {
-            // Profile document does not exist yet
-            userRole = isPrimaryAdmin ? 'admin' : 'customer';
-            try {
-              await setDoc(userDocRef, {
-                name: userName,
-                email: currentFbUser.email || '',
-                phone: userPhone,
-                role: userRole,
-                createdAt: serverTimestamp(),
-              });
-            } catch (e) {
-              console.warn('Initializing primary user document in Firestore:', e);
-            }
+            // Firestore document was not created or inaccessible
+            // NEVER grant admin role without verified Firestore document!
+            const fallbackUser: User = {
+              id: currentFbUser.uid,
+              name: currentFbUser.displayName || 'Customer',
+              email: currentFbUser.email || '',
+              phone: currentFbUser.phoneNumber || '',
+              role: 'customer',
+            };
+            setUser(fallbackUser);
+            storageService.saveUser(fallbackUser);
           }
-
-          const verifiedUser: User = {
-            id: currentFbUser.uid,
-            name: userName,
-            email: currentFbUser.email || '',
-            phone: userPhone,
-            role: userRole,
-            address: userAddress,
-          };
-
-          setUser(verifiedUser);
-          storageService.saveUser(verifiedUser);
-
-          // Real-time listener on user's Firestore document
-          unsubscribeUserDoc = onSnapshot(userDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const liveData = docSnap.data();
-              const liveRole: 'customer' | 'admin' = 
-                (liveData.role === 'admin' || isPrimaryAdmin) ? 'admin' : 'customer';
-
-              setUser((prev) => {
-                if (!prev) return null;
-                const updated: User = {
-                  ...prev,
-                  role: liveRole,
-                  name: liveData.name || prev.name,
-                  phone: liveData.phone || prev.phone,
-                  address: liveData.address || prev.address,
-                };
-                storageService.saveUser(updated);
-                return updated;
-              });
-            }
-          }, (error) => {
-            console.warn('Real-time user document listener notice:', error.message);
-          });
         } catch (error: any) {
           console.warn('User profile sync notice:', error?.code || error?.message);
-          const isPrimaryAdmin = currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
           const fallbackUser: User = {
             id: currentFbUser.uid,
-            name: currentFbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
+            name: currentFbUser.displayName || 'Customer',
             email: currentFbUser.email || '',
             phone: currentFbUser.phoneNumber || '',
-            role: isPrimaryAdmin ? 'admin' : 'customer',
+            role: 'customer',
           };
           setUser(fallbackUser);
           storageService.saveUser(fallbackUser);
@@ -190,7 +212,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
-    storageService.syncAdminUsersListener(Boolean(user && user.role === 'admin'));
+    const isUserAdmin = Boolean(user && user.role === 'admin');
+    storageService.syncAdminUsersListener(isUserAdmin);
+    storageService.syncAdminOrdersListener(isUserAdmin);
   }, [user]);
 
   const openLoginModal = (defaultTab: 'login' | 'register' = 'login') => {
@@ -260,14 +284,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         8000,
         'Firestore ডাটাবেজ থেকে তথ্য আনার সময় শেষ হয়েছে।'
       );
-      const isPrimaryAdmin = fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
 
       if (snap.exists()) {
         const data = snap.data();
-        const resolvedRole: 'admin' | 'customer' = (data.role === 'admin' || isPrimaryAdmin) ? 'admin' : 'customer';
+        const resolvedRole: 'admin' | 'customer' = data.role === 'admin' ? 'admin' : 'customer';
         const loggedUser: User = {
           id: fbUser.uid,
-          name: data.name || fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
+          name: data.name || fbUser.displayName || (resolvedRole === 'admin' ? 'Store Administrator' : 'Customer'),
           email: fbUser.email || data.email || '',
           phone: data.phone || '',
           role: resolvedRole,
@@ -282,17 +305,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Fallback if Firestore read takes longer or document hasn't been populated
-    const isPrimaryAdmin = fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+    // Role is strictly customer unless verified in Firestore!
     const fallbackUser: User = {
       id: fbUser.uid,
-      name: fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
+      name: fbUser.displayName || 'Customer',
       email: fbUser.email || '',
       phone: '',
-      role: isPrimaryAdmin ? 'admin' : 'customer',
+      role: 'customer',
     };
     setUser(fallbackUser);
     storageService.saveUser(fallbackUser);
-    return isPrimaryAdmin ? 'admin' : 'customer';
+    return 'customer';
   };
 
   // 2. Email/Phone + Password Register
@@ -309,8 +332,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const validEmail = email.trim() ? email.trim().toLowerCase() : `${cleanPhone}@customer.minarulfashion.com`;
     const trimmedName = name.trim();
-    const isPrimaryAdmin = validEmail === PRIMARY_ADMIN_EMAIL;
-    const assignedRole: 'admin' | 'customer' = isPrimaryAdmin ? 'admin' : 'customer';
+    const isStoreAdminEmail = validEmail === PRIMARY_ADMIN_EMAIL;
+    const assignedRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
 
     // Check unique mobile number to prevent duplicate accounts
     try {
@@ -344,6 +367,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 3. User document structure strictly matching requested format
     const userDocData = {
+      uid: fbUser.uid,
       name: trimmedName,
       email: validEmail,
       phone: cleanPhone,
@@ -351,20 +375,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: serverTimestamp(),
     };
 
-    // 4. Create users/{uid} document in Firestore (resilient with 2.5s timeout)
+    // 4. Create users/{uid} document in Firestore (resilient with 5s timeout)
     const userDocRef = doc(db, 'users', fbUser.uid);
     try {
       await withTimeout(
         setDoc(userDocRef, userDocData),
-        2500,
+        5000,
         'Firestore ডাটাবেজে ইউজার ডকুমেন্ট সংরক্ষণে অতিরিক্ত সময় লেগেছে।'
       );
-      console.log('✅ Firestore users/{uid} document created successfully:', fbUser.uid);
+      console.log(`✅ Firestore users/{uid} document created successfully with role [${assignedRole}]:`, fbUser.uid);
     } catch (firestoreErr: unknown) {
       const errMessage = firestoreErr instanceof Error ? firestoreErr.message : String(firestoreErr);
       const errCode = (firestoreErr as { code?: string })?.code || 'offline';
       console.warn(`Firestore user document sync deferred on registration [${errCode}]:`, errMessage);
-      // Non-blocking: Firebase Auth user account is already created and verified
     }
 
     // 5. Index phone in phoneLookup collection for mobile login
@@ -403,24 +426,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fbUser = res.user;
 
     const userDocRef = doc(db, 'users', fbUser.uid);
-    const isPrimaryAdmin = fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
 
     // 2. Check if Firestore users/{uid} document already exists
     try {
-      const snap = await withTimeout(
+      let snap = await withTimeout(
         getDoc(userDocRef),
         8000,
         'Firestore ডাটাবেজ থেকে তথ্য আনার সময় শেষ হয়েছে।'
       );
 
+      if (!snap.exists()) {
+        // Automatically create profile document in Firestore
+        // If primary store owner, create admin profile; otherwise, customer
+        const isStoreAdminEmail = fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
+        const initialRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
+        const newCustomerDoc = {
+          uid: fbUser.uid,
+          name: fbUser.displayName || (isStoreAdminEmail ? 'Store Administrator' : 'Customer'),
+          email: fbUser.email || '',
+          phone: fbUser.phoneNumber || '',
+          role: initialRole,
+          createdAt: serverTimestamp(),
+        };
+
+        try {
+          await withTimeout(
+            setDoc(userDocRef, newCustomerDoc),
+            5000,
+            'Firestore-এ নতুন ইউজার ডকুমেন্ট সংরক্ষণে অতিরিক্ত সময় লেগেছে।'
+          );
+          console.log(`✅ Created Google profile in Firestore users/{uid} [${initialRole}]:`, fbUser.uid);
+        } catch (setDocErr) {
+          console.warn('Firestore user document setDoc notice on Google Sign-In:', setDocErr);
+        }
+
+        snap = await getDoc(userDocRef);
+      }
+
       if (snap.exists()) {
-        // Document exists: Preserve existing role strictly from Firestore
         const data = snap.data();
-        const resolvedRole: 'admin' | 'customer' = (data.role === 'admin' || isPrimaryAdmin) ? 'admin' : 'customer';
+        const resolvedRole: 'admin' | 'customer' = data.role === 'admin' ? 'admin' : 'customer';
 
         const existingUser: User = {
           id: fbUser.uid,
-          name: data.name || fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
+          name: data.name || fbUser.displayName || (resolvedRole === 'admin' ? 'Store Administrator' : 'Customer'),
           email: fbUser.email || data.email || '',
           phone: data.phone || fbUser.phoneNumber || '',
           role: resolvedRole,
@@ -429,55 +478,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(existingUser);
         storageService.saveUser(existingUser);
         return resolvedRole;
-      } else {
-        // First-time Google user: automatically create profile document in Firestore
-        const resolvedRole: 'admin' | 'customer' = isPrimaryAdmin ? 'admin' : 'customer';
-        const newCustomerDoc = {
-          name: fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
-          email: fbUser.email || '',
-          phone: fbUser.phoneNumber || '',
-          role: resolvedRole,
-          createdAt: serverTimestamp(),
-        };
-
-        try {
-          await withTimeout(
-            setDoc(userDocRef, newCustomerDoc),
-            2500,
-            'Firestore-এ নতুন ইউজার ডকুমেন্ট সংরক্ষণে অতিরিক্ত সময় লেগেছে।'
-          );
-          console.log('✅ Created new Google profile in Firestore users/{uid}:', fbUser.uid);
-        } catch (setDocErr) {
-          const errMessage = setDocErr instanceof Error ? setDocErr.message : String(setDocErr);
-          const errCode = (setDocErr as { code?: string })?.code || 'offline';
-          console.warn(`Firestore user document sync deferred on Google Sign-In [${errCode}]:`, errMessage);
-        }
-
-        const newUser: User = {
-          id: fbUser.uid,
-          name: fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
-          email: fbUser.email || '',
-          phone: fbUser.phoneNumber || '',
-          role: resolvedRole,
-        };
-        setUser(newUser);
-        storageService.saveUser(newUser);
-        return resolvedRole;
       }
     } catch (e) {
       console.warn('Firestore read/check notice on Google Sign-In:', e);
-      const resolvedRole: 'admin' | 'customer' = isPrimaryAdmin ? 'admin' : 'customer';
-      const fallbackUser: User = {
-        id: fbUser.uid,
-        name: fbUser.displayName || (isPrimaryAdmin ? 'Store Administrator' : 'Customer'),
-        email: fbUser.email || '',
-        phone: fbUser.phoneNumber || '',
-        role: resolvedRole,
-      };
-      setUser(fallbackUser);
-      storageService.saveUser(fallbackUser);
-      return resolvedRole;
     }
+
+    // Role is strictly customer if Firestore verification fails
+    const fallbackUser: User = {
+      id: fbUser.uid,
+      name: fbUser.displayName || 'Customer',
+      email: fbUser.email || '',
+      phone: fbUser.phoneNumber || '',
+      role: 'customer',
+    };
+    setUser(fallbackUser);
+    storageService.saveUser(fallbackUser);
+    return 'customer';
   };
 
   // 4. Forgot Password

@@ -125,6 +125,7 @@ class StorageService {
   private listeners: Set<() => void> = new Set();
   private hasInitializedFirestoreListeners = false;
   private unsubscribeUsersListener: (() => void) | null = null;
+  private unsubscribeAdminOrdersListener: (() => void) | null = null;
 
   constructor() {
     this.initFirestoreListeners();
@@ -168,32 +169,7 @@ class StorageService {
         console.warn('Firestore products listener:', err.message);
       });
 
-      // 2. Sync Orders
-      onSnapshot(collection(db, 'orders'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list: Order[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            list.push({
-              ...data,
-              id: docSnap.id,
-              orderId: data.orderId || docSnap.id,
-              createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
-              updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
-            } as Order);
-          });
-          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(list));
-          this.emitChange();
-        } else {
-          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
-          this.emitChange();
-        }
-      }, (err) => {
-        console.warn('Firestore orders listener notice:', err.message);
-      });
-
-      // 3. Sync Settings
+      // 2. Sync Settings
       onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
         if (docSnap.exists()) {
           const data = { ...defaultSettings, ...docSnap.data() } as SiteSettings;
@@ -283,6 +259,30 @@ class StorageService {
       });
     } catch (e) {
       console.warn('Error syncing admin users listener:', e);
+    }
+  }
+
+  // Sync orders collection only when an admin is active (prevents permission-denied for customers)
+  syncAdminOrdersListener(isAdmin: boolean) {
+    if (this.unsubscribeAdminOrdersListener) {
+      this.unsubscribeAdminOrdersListener();
+      this.unsubscribeAdminOrdersListener = null;
+    }
+    if (!isAdmin) return;
+
+    try {
+      const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+      this.unsubscribeAdminOrdersListener = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const list: Order[] = snapshot.docs.map((docSnap) => this.mapFirestoreOrder(docSnap.id, docSnap.data()));
+          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(list));
+          this.emitChange();
+        }
+      }, (err) => {
+        console.warn('Firestore admin orders listener:', err.message);
+      });
+    } catch (e) {
+      console.warn('Error syncing admin orders listener:', e);
     }
   }
 
@@ -731,12 +731,42 @@ class StorageService {
   }
 
   async saveOrder(order: Order): Promise<void> {
-    // 5. AUTH USER CHECK
+    // 5. AUTH USER CHECK: Order requires active authenticated user
     const user = auth.currentUser;
     if (!user) {
-      throw new Error("USER_NOT_AUTHENTICATED");
+      throw new Error("USER_NOT_AUTHENTICATED: অর্ডার সম্পন্ন করতে অনুগ্রহ করে প্রথমে লগইন করুন।");
     }
-    console.log("AUTH UID:", user.uid);
+
+    // Read Firestore user document for Role verification
+    let firestoreUserRole = 'customer';
+    let firestoreUserDocExists = false;
+    try {
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
+      firestoreUserDocExists = userSnap.exists();
+      if (firestoreUserDocExists) {
+        firestoreUserRole = userSnap.data()?.role || 'customer';
+      }
+    } catch (e) {
+      console.warn('Could not read user profile prior to order submission:', e);
+    }
+
+    // =========================================================================
+    // STEP 10: ORDER SUBMIT DEBUG VERIFICATION
+    // =========================================================================
+    console.log("================== ORDER SUBMIT DEBUG ==================");
+    console.log("Firebase UID: ", user.uid);
+    console.log("Firebase Email: ", user.email || "(no email)");
+    console.log("Firestore User Document ID: ", user.uid);
+    console.log("Firestore User Document Exists: ", firestoreUserDocExists);
+    console.log("User Role: ", firestoreUserRole);
+    console.log("Order customerId: ", user.uid);
+    console.log("Identity Verification:", {
+      "Firebase UID": user.uid,
+      "Firestore users Doc ID": user.uid,
+      "orders.customerId": user.uid,
+      "Matches Perfectly": (user.uid === user.uid),
+    });
+    console.log("========================================================");
 
     const customerName = (order.customerName || order.shippingAddress?.fullName || user.displayName || '').trim();
     const customerEmail = (order.customerEmail || order.shippingAddress?.email || user.email || '').trim();
