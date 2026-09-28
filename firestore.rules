@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Admin authorization check:
+    // Strictly determined from Firestore users/{uid}.role == 'admin'
+    function isAdmin() {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ----------------- USERS COLLECTION -----------------
+    match /users/{userId} {
+      // Customer can read their own profile; Admin can read any profile or list users
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      // Creation: customer can create their own profile with role == 'customer'
+      // Customer cannot self-assign role == 'admin'
+      allow create: if isSignedIn() && (
+        (isOwner(userId) && (
+          !('role' in request.resource.data) || 
+          request.resource.data.role == 'customer'
+        )) ||
+        isAdmin()
+      );
+
+      // Update: user can update own profile, but CANNOT escalate role to 'admin'
+      allow update: if isSignedIn() && (
+        (isOwner(userId) && (
+          !('role' in request.resource.data) || 
+          request.resource.data.role == resource.data.role
+        )) ||
+        isAdmin()
+      );
+
+      // Only Admin can delete users
+      allow delete: if isAdmin();
+    }
+
+    // ----------------- PRODUCTS COLLECTION -----------------
+    // Public can view/search products; Only Admin can add, edit, or delete
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ----------------- ORDERS COLLECTION -----------------
+    // Customer can create order and read their own orders; Admin can read and manage all
+    match /orders/{orderId} {
+      allow read: if isAdmin()
+                  || (
+                    isSignedIn()
+                    && resource.data.customerId == request.auth.uid
+                  );
+
+      allow create: if isSignedIn()
+                    && request.resource.data.customerId == request.auth.uid;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // ----------------- COUPONS COLLECTION -----------------
+    // Public can read to validate coupons at checkout; Only Admin can manage
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ----------------- REVIEWS COLLECTION -----------------
+    // Public can read reviews; Anyone can submit a review; Admin can manage
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // ----------------- SETTINGS COLLECTION -----------------
+    // Public can read site settings; Only Admin can modify settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ----------------- HERO SLIDES COLLECTION -----------------
+    // Public can read slides; Only Admin can modify
+    match /heroSlides/{slideId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ----------------- BUSINESS / ACCOUNTING COLLECTIONS -----------------
+    match /purchases/{purchaseId} { allow read, write: if isAdmin(); }
+    match /sales/{saleId} { allow read, write: if isAdmin(); }
+    match /suppliers/{supplierId} { allow read, write: if isAdmin(); }
+    match /expenses/{expenseId} { allow read, write: if isAdmin(); }
+    match /stockMovements/{movementId} { allow read, write: if isAdmin(); }
+    match /returns/{returnId} { allow read, write: if isAdmin(); }
+    match /payments/{paymentId} { allow read, write: if isAdmin(); }
+    match /accounts/{accountId} { allow read, write: if isAdmin(); }
+
+    // ----------------- PHONE LOOKUP COLLECTION -----------------
+    // Maps normalized phone number to registered user email for Mobile Login
+    match /phoneLookup/{phone} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+  }
+}
