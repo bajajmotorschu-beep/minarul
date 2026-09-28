@@ -21,11 +21,49 @@ export function withTimeout<T>(
   ]);
 }
 
+/**
+ * Returns current window hostname safely for domain authorization
+ */
+export function getCurrentHostname(): string {
+  if (typeof window !== 'undefined' && window.location) {
+    return window.location.hostname;
+  }
+  return '';
+}
+
+/**
+ * Checks if error is related to Firebase Auth unauthorized domain
+ */
+export function isUnauthorizedDomainError(err: unknown): boolean {
+  if (!err) return false;
+  const str = err instanceof Error ? err.message : String(err);
+  return str.includes('auth/unauthorized-domain') || str.includes('unauthorized domain');
+}
+
+/**
+ * Checks if error is an invalid credential or user not found
+ */
+export function isInvalidCredentialError(err: unknown): boolean {
+  if (!err) return false;
+  const str = err instanceof Error ? err.message : String(err);
+  return (
+    str.includes('auth/invalid-credential') ||
+    str.includes('auth/wrong-password') ||
+    str.includes('auth/user-not-found')
+  );
+}
+
 export function formatAuthError(err: unknown, language: 'bn' | 'en' = 'bn'): string {
   if (!err) return '';
   const errorStr = err instanceof Error ? err.message : String(err);
+  const currentHost = getCurrentHostname();
 
   // 1. Google Sign-In Popup & Domain Errors
+  if (errorStr.includes('auth/unauthorized-domain') || isUnauthorizedDomainError(err)) {
+    return language === 'bn'
+      ? `বর্তমান ওয়েবসাইট ডোমেন (${currentHost || 'preview domain'}) Firebase Console-এ অনুমোদিত নয়। দয়া করে Firebase Console > Authentication > Settings > Authorized domains-এ এই ডোমেনটি যুক্ত করুন, অথবা নিচে মোবাইল/ইমেইল ও পাসওয়ার্ড দিয়ে সাইন ইন করুন।`
+      : `Current domain (${currentHost || 'preview domain'}) is not authorized in Firebase Console. Please add it to Firebase Console > Authentication > Settings > Authorized domains, or sign in below with mobile/email and password.`;
+  }
   if (errorStr.includes('auth/popup-closed-by-user')) {
     return language === 'bn'
       ? 'গুগল সাইন-ইন পপ-আপ উইন্ডো বন্ধ করা হয়েছে। পুনরায় চেষ্টা করুন।'
@@ -40,11 +78,6 @@ export function formatAuthError(err: unknown, language: 'bn' | 'en' = 'bn'): str
     return language === 'bn'
       ? 'আপনার ব্রাউজার সাইন-ইন পপ-আপ ব্লক করেছে। ব্রাউজারের অ্যাড্রেস বার থেকে পপ-আপ এলাও (Allow) করে আবার চেষ্টা করুন।'
       : 'Popup was blocked by your browser. Please allow popups for this site and try again.';
-  }
-  if (errorStr.includes('auth/unauthorized-domain')) {
-    return language === 'bn'
-      ? 'এই ওয়েবসাইট ডোমেনটি Firebase Console-এ অথরাইজড নয়। দয়া করে Firebase Console > Authentication > Settings > Authorized domains-এ বর্তমান ডোমেন যুক্ত করুন।'
-      : 'This domain is not authorized in Firebase Authentication. Please add it in Firebase Console > Authentication > Settings > Authorized domains.';
   }
   if (errorStr.includes('auth/operation-not-allowed')) {
     return language === 'bn'
@@ -69,8 +102,8 @@ export function formatAuthError(err: unknown, language: 'bn' | 'en' = 'bn'): str
     errorStr.includes('auth/user-not-found')
   ) {
     return language === 'bn'
-      ? 'ভুল ইমেইল/মোবাইল অথবা পাসওয়ার্ড। অনুগ্রহ করে যাচাই করে সঠিক তথ্য দিন।'
-      : 'Incorrect email/phone or password. Please verify and try again.';
+      ? 'ভুল ইমেইল/মোবাইল অথবা পাসওয়ার্ড। যদি আপনার কোনো অ্যাকাউন্ট না থাকে, অনুগ্রহ করে নতুন অ্যাকাউন্ট তৈরি (Register) করুন।'
+      : 'Incorrect email/phone or password. If you do not have an account yet, please register.';
   }
   if (errorStr.includes('auth/invalid-email')) {
     return language === 'bn'
@@ -110,3 +143,4 @@ export function formatAuthError(err: unknown, language: 'bn' | 'en' = 'bn'): str
   // Fallback to error message
   return errorStr;
 }
+

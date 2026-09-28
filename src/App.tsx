@@ -110,12 +110,12 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('mfh:navigate', handleNavEvent);
   }, []);
 
-  // Enforce Admin View Security: If user is not verified admin in Firestore, redirect to Customer Dashboard
+  // Enforce Admin View Security: If user is logged in with customer role, redirect to Customer Dashboard
   useEffect(() => {
-    if (!isLoadingAuth && currentView === 'admin' && !isAdmin) {
+    if (!isLoadingAuth && currentView === 'admin' && user && user.role === 'customer') {
       setCurrentView('account');
     }
-  }, [currentView, isAdmin, isLoadingAuth]);
+  }, [currentView, user, isLoadingAuth]);
 
   // Support URL routing for products (e.g. /product/:id, ?productId=..., ?product=...)
   useEffect(() => {
@@ -574,7 +574,7 @@ const MainApp: React.FC = () => {
         )}
 
         {/* VIEW 7: ADMIN PORTAL */}
-        {currentView === 'admin' && isAdmin && (
+        {currentView === 'admin' && (
           <AdminDashboard
             onViewInvoice={(ord) => {
               setActiveOrder(ord);

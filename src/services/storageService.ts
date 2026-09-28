@@ -299,7 +299,31 @@ class StorageService {
 
   private async seedInitialSettings() {
     try {
-      await setDoc(doc(db, 'settings', 'general'), defaultSettings, { merge: true });
+      await Promise.all([
+        setDoc(doc(db, 'settings', 'website'), {
+          announcementEn: defaultSettings.announcementEn,
+          announcementBn: defaultSettings.announcementBn,
+          hotline: defaultSettings.hotline,
+          whatsapp: defaultSettings.whatsapp,
+          supportEmail: defaultSettings.supportEmail,
+          flagshipAddressEn: defaultSettings.flagshipAddressEn,
+          flagshipAddressBn: defaultSettings.flagshipAddressBn,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+        setDoc(doc(db, 'settings', 'payment'), {
+          bkashMerchantNumber: defaultSettings.bkashMerchantNumber,
+          nagadMerchantNumber: defaultSettings.nagadMerchantNumber,
+          rocketMerchantNumber: defaultSettings.rocketMerchantNumber,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+        setDoc(doc(db, 'settings', 'logistics'), {
+          dhakaDeliveryFee: defaultSettings.dhakaDeliveryFee,
+          outsideDhakaDeliveryFee: defaultSettings.outsideDhakaDeliveryFee,
+          freeShippingThreshold: defaultSettings.freeShippingThreshold,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }),
+        setDoc(doc(db, 'settings', 'general'), defaultSettings, { merge: true }),
+      ]);
     } catch (e) {
       console.warn('Could not auto-seed settings to Firestore:', e);
     }
@@ -347,26 +371,72 @@ class StorageService {
   }
 
   async fetchSettingsFromFirestore(): Promise<SiteSettings> {
-    const snap = await getDoc(doc(db, 'settings', 'general'));
-    if (!snap.exists()) {
-      await setDoc(doc(db, 'settings', 'general'), { ...defaultSettings, updatedAt: serverTimestamp() }, { merge: true });
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(defaultSettings));
-      return { ...defaultSettings };
+    try {
+      const [websiteSnap, paymentSnap, logisticsSnap, generalSnap] = await Promise.all([
+        getDoc(doc(db, 'settings', 'website')),
+        getDoc(doc(db, 'settings', 'payment')),
+        getDoc(doc(db, 'settings', 'logistics')),
+        getDoc(doc(db, 'settings', 'general')),
+      ]);
+
+      const merged: SiteSettings = {
+        ...defaultSettings,
+        ...(generalSnap.exists() ? (generalSnap.data() as Partial<SiteSettings>) : {}),
+        ...(websiteSnap.exists() ? (websiteSnap.data() as Partial<SiteSettings>) : {}),
+        ...(paymentSnap.exists() ? (paymentSnap.data() as Partial<SiteSettings>) : {}),
+        ...(logisticsSnap.exists() ? (logisticsSnap.data() as Partial<SiteSettings>) : {}),
+      };
+
+      if (!websiteSnap.exists() && !paymentSnap.exists() && !logisticsSnap.exists() && !generalSnap.exists()) {
+        await this.seedInitialSettings();
+      }
+
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(merged));
+      this.emitChange();
+      return merged;
+    } catch (e) {
+      console.warn('Settings fetch notice, using fallback cache:', e);
+      return this.getSettings();
     }
-    const data = { ...defaultSettings, ...snap.data() } as SiteSettings;
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(data));
-    this.emitChange();
-    return data;
   }
 
   async saveSettings(settings: SiteSettings): Promise<void> {
-    const payload = { ...settings, updatedAt: serverTimestamp() };
-    // Firestore is the source of truth. Do not report success until the write completes.
-    await setDoc(doc(db, 'settings', 'general'), payload, { merge: true });
-    const verify = await getDoc(doc(db, 'settings', 'general'));
-    if (!verify.exists()) throw new Error('SETTINGS_VERIFY_FAILED');
-    const verified = { ...defaultSettings, ...verify.data() } as SiteSettings;
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(verified));
+    const websitePayload = {
+      announcementEn: settings.announcementEn,
+      announcementBn: settings.announcementBn,
+      hotline: settings.hotline,
+      whatsapp: settings.whatsapp,
+      supportEmail: settings.supportEmail,
+      flagshipAddressEn: settings.flagshipAddressEn,
+      flagshipAddressBn: settings.flagshipAddressBn,
+      updatedAt: serverTimestamp(),
+    };
+    const paymentPayload = {
+      bkashMerchantNumber: settings.bkashMerchantNumber,
+      nagadMerchantNumber: settings.nagadMerchantNumber,
+      rocketMerchantNumber: settings.rocketMerchantNumber,
+      updatedAt: serverTimestamp(),
+    };
+    const logisticsPayload = {
+      dhakaDeliveryFee: Number(settings.dhakaDeliveryFee) || 0,
+      outsideDhakaDeliveryFee: Number(settings.outsideDhakaDeliveryFee) || 0,
+      freeShippingThreshold: Number(settings.freeShippingThreshold) || 0,
+      updatedAt: serverTimestamp(),
+    };
+    const generalPayload = {
+      ...settings,
+      updatedAt: serverTimestamp(),
+    };
+
+    // Save across Firestore settings collections
+    await Promise.all([
+      setDoc(doc(db, 'settings', 'website'), websitePayload, { merge: true }),
+      setDoc(doc(db, 'settings', 'payment'), paymentPayload, { merge: true }),
+      setDoc(doc(db, 'settings', 'logistics'), logisticsPayload, { merge: true }),
+      setDoc(doc(db, 'settings', 'general'), generalPayload, { merge: true }),
+    ]);
+
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
     this.emitChange();
   }
 
@@ -991,6 +1061,14 @@ class StorageService {
   }
 
   // ---------------- REVIEWS ----------------
+  async uploadReviewPhoto(productId: string, customerId: string, reviewId: string, file: File): Promise<string> {
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const storageRef = ref(storage, `reviews/${productId}/${customerId}/${reviewId}/product-photo.${fileExt}`);
+    await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(storageRef);
+    return downloadUrl;
+  }
+
   getReviews(productId?: string): Review[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.REVIEWS);
@@ -1005,6 +1083,17 @@ class StorageService {
   }
 
   async addReview(review: Review): Promise<void> {
+    const payload = {
+      ...review,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      await setDoc(doc(db, 'reviews', review.id), payload);
+    } catch (e) {
+      console.warn('Error adding review to Firestore:', e);
+    }
+
     const reviews = this.getReviews();
     reviews.unshift(review);
     localStorage.setItem(STORAGE_KEYS.REVIEWS, JSON.stringify(reviews));
@@ -1020,12 +1109,6 @@ class StorageService {
       this.saveProduct(product);
     }
     this.emitChange();
-
-    try {
-      await setDoc(doc(db, 'reviews', review.id), review);
-    } catch (e) {
-      console.error('Error adding review to Firestore:', e);
-    }
   }
 
   async deleteReview(reviewId: string): Promise<void> {

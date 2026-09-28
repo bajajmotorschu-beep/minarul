@@ -8,11 +8,22 @@ import {
   Mail, 
   CheckCircle2, 
   AlertCircle, 
-  Loader2 
+  Loader2,
+  Copy,
+  Check,
+  Globe,
+  ExternalLink,
+  UserPlus
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
-import { formatAuthError } from '../../utils/authErrors';
+import { 
+  formatAuthError, 
+  isUnauthorizedDomainError, 
+  isInvalidCredentialError, 
+  getCurrentHostname 
+} from '../../utils/authErrors';
+import { normalizePhoneNumber, isValidBangladeshiPhone } from '../../utils/phoneUtils';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -48,6 +59,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [domainCopied, setDomainCopied] = useState(false);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [isCredentialMismatch, setIsCredentialMismatch] = useState(false);
 
   // Sync mode with requested tab from AuthContext whenever modal opens
   useEffect(() => {
@@ -56,6 +70,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setErrorMsg('');
       setSuccessMsg('');
       setLoading(false);
+      setIsUnauthorizedDomain(false);
+      setIsCredentialMismatch(false);
+      setDomainCopied(false);
     }
   }, [isOpen, loginModalTab]);
 
@@ -64,6 +81,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const resetFormState = () => {
     setErrorMsg('');
     setSuccessMsg('');
+    setIsUnauthorizedDomain(false);
+    setIsCredentialMismatch(false);
+    setDomainCopied(false);
+  };
+
+  const handleCopyHostname = () => {
+    const host = getCurrentHostname();
+    if (host && navigator.clipboard) {
+      navigator.clipboard.writeText(host);
+      setDomainCopied(true);
+      setTimeout(() => setDomainCopied(false), 3000);
+    }
+  };
+
+  const handleSwitchToRegisterWithPrepopulation = () => {
+    resetFormState();
+    setMode('register');
+    const input = emailOrPhone.trim();
+    if (input.includes('@')) {
+      setRegisterEmail(input);
+    } else {
+      const clean = normalizePhoneNumber(input);
+      if (clean) {
+        setPhone(clean);
+      }
+    }
   };
 
   // 1. Email / Phone Login Submit
@@ -90,8 +133,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         if (onSuccess) onSuccess(role);
       }, 400);
     } catch (err: unknown) {
-      console.error('❌ Login Error:', err);
+      console.warn('Login attempt notification:', (err as any)?.message || err);
       setErrorMsg(formatAuthError(err, language));
+      if (isInvalidCredentialError(err)) {
+        setIsCredentialMismatch(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -133,7 +179,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         if (onSuccess) onSuccess(role);
       }, 500);
     } catch (err: unknown) {
-      console.error('❌ Registration Error:', err);
+      console.warn('Registration attempt notification:', (err as any)?.message || err);
       setErrorMsg(formatAuthError(err, language));
     } finally {
       setLoading(false);
@@ -159,7 +205,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           : 'Password reset link sent to your email.'
       );
     } catch (err: unknown) {
-      console.error('❌ Forgot Password Error:', err);
+      console.warn('Forgot password notification:', (err as any)?.message || err);
       setErrorMsg(formatAuthError(err, language));
     } finally {
       setLoading(false);
@@ -179,12 +225,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         if (onSuccess) onSuccess(role);
       }, 400);
     } catch (err: unknown) {
-      console.error('❌ Google Sign-In Error:', err);
+      console.warn('Google Sign-In notification:', (err as any)?.message || err);
+      if (isUnauthorizedDomainError(err)) {
+        setIsUnauthorizedDomain(true);
+      }
       setErrorMsg(formatAuthError(err, language));
     } finally {
       setLoading(false);
     }
   };
+
+  const currentHost = getCurrentHostname();
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/75 backdrop-blur-sm flex justify-center items-center p-4 animate-in fade-in duration-200">
@@ -245,10 +296,70 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-4">
-          {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{errorMsg}</span>
+          {/* Unauthorized Domain Helper Card */}
+          {isUnauthorizedDomain && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2.5 text-stone-800">
+              <div className="flex items-center gap-2 font-bold text-amber-900">
+                <Globe className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  {language === 'bn' ? 'গুগল সাইন-ইন ডোমেন অনুমতি নির্দেশিকা' : 'Google Sign-In Domain Setup'}
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-600 leading-relaxed">
+                {language === 'bn'
+                  ? 'গুগল পপ-আপ সাইন-ইনের জন্য Firebase Console-এ আপনার বর্তমান ডোমেনটি Authorized domains তালিকায় যোগ করতে হবে:'
+                  : 'For Google Sign-In popup, add this preview domain to Firebase Authorized domains:'}
+              </p>
+              <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-amber-200 font-mono text-[11px] text-stone-700 break-all">
+                <span className="truncate">{currentHost || window.location.hostname}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyHostname}
+                  className="shrink-0 px-2 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg font-sans text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  {domainCopied ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-300" />
+                      <span>{language === 'bn' ? 'কপি হয়েছে' : 'Copied'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>{language === 'bn' ? 'কপি ডোমেন' : 'Copy'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-[10px] text-stone-500">
+                💡 {language === 'bn'
+                  ? 'অথবা কোনো কনফিগারেশন ছাড়াই সরাসরি মোবাইল/ইমেইল ও পাসওয়ার্ড দিয়ে নিচে লগইন করুন।'
+                  : 'Or simply sign in below using your mobile number/email and password.'}
+              </p>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {errorMsg && !isUnauthorizedDomain && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 space-y-1.5">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{errorMsg}</span>
+              </div>
+              {isCredentialMismatch && mode === 'login' && (
+                <div className="pt-1 border-t border-rose-200/60 pl-6 flex items-center justify-between">
+                  <span className="text-[11px] text-stone-600">
+                    {language === 'bn' ? 'অ্যাকাউন্ট নেই?' : "Don't have an account?"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSwitchToRegisterWithPrepopulation}
+                    className="text-[11px] font-bold text-amber-800 hover:text-amber-900 underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{language === 'bn' ? 'নতুন অ্যাকাউন্ট খুলুন' : 'Register Here'}</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -277,6 +388,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     className="w-full text-xs pl-10 pr-4 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
                   />
                 </div>
+                <p className="text-[10px] text-stone-500 mt-1">
+                  {language === 'bn'
+                    ? '১১ সংখ্যার বাংলাদেশি মোবাইল (যেমন: 017XXXXXXXX) অথবা ইমেইল দিন'
+                    : '11-digit Bangladeshi mobile (e.g. 017XXXXXXXX) or registered email'}
+                </p>
               </div>
 
               <div>
@@ -290,7 +406,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setMode('forgot');
                       resetFormState();
                     }}
-                    className="text-[11px] text-amber-700 hover:underline font-semibold"
+                    className="text-[11px] text-amber-700 hover:underline font-semibold cursor-pointer"
                   >
                     {language === 'bn' ? 'পাসওয়ার্ড ভুলে গেছেন?' : 'Forgot Password?'}
                   </button>
@@ -363,6 +479,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     className="w-full text-xs pl-10 pr-4 py-2 rounded-xl border border-stone-300 focus:border-amber-600 outline-none font-mono"
                   />
                 </div>
+                <p className="text-[10px] text-stone-500 mt-1">
+                  {language === 'bn' ? '১১ সংখ্যার বাংলাদেশি মোবাইল নম্বর' : '11-digit Bangladeshi mobile number'}
+                </p>
               </div>
 
               <div>
@@ -527,3 +646,4 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     </div>
   );
 };
+

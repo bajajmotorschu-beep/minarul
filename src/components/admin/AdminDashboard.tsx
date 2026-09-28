@@ -32,11 +32,18 @@ import {
   Filter,
   Eye,
   Upload,
-  Users as UsersIcon
+  Users as UsersIcon,
+  Globe
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { 
+  formatAuthError, 
+  isUnauthorizedDomainError, 
+  getCurrentHostname, 
+  isInvalidCredentialError 
+} from '../../utils/authErrors';
 import { 
   Order, 
   Product, 
@@ -51,7 +58,6 @@ import {
   ProductColor,
   User
 } from '../../types';
-import { formatAuthError } from '../../utils/authErrors';
 import { app, db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
@@ -129,18 +135,263 @@ const SIZE_PRESETS = [
   { label: 'Free Size (শাড়ি / থ্রি-পিস)', value: 'Free Size' },
 ];
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({
+export const AdminLoginScreen: React.FC<{
+  onToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+}> = ({ onToast }) => {
+  const { language } = useLanguage();
+  const { loginWithEmail, registerWithEmail, loginWithGoogle } = useAuth();
+
+  const [adminMode, setAdminMode] = useState<'login' | 'setup'>('login');
+  const [adminEmail, setAdminEmail] = useState('bajajmotors.chu@gmail.com');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminAuthLoading, setAdminAuthLoading] = useState(false);
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [isGoogleDomainError, setIsGoogleDomainError] = useState(false);
+  const [domainCopied, setDomainCopied] = useState(false);
+
+  const handleCopyHostname = () => {
+    const host = getCurrentHostname();
+    if (host && navigator.clipboard) {
+      navigator.clipboard.writeText(host);
+      setDomainCopied(true);
+      setTimeout(() => setDomainCopied(false), 3000);
+    }
+  };
+
+  const handleAdminDirectLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError('');
+    setIsGoogleDomainError(false);
+    try {
+      setAdminAuthLoading(true);
+      const targetEmail = adminEmail.trim() || 'bajajmotors.chu@gmail.com';
+      if (adminMode === 'setup') {
+        if (adminPassword.length < 6) {
+          setAdminAuthError(language === 'bn' ? 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে' : 'Password must be at least 6 characters');
+          return;
+        }
+        await registerWithEmail('Store Administrator', targetEmail, '01700000000', adminPassword);
+        onToast(language === 'bn' ? 'অ্যাডমিন অ্যাকাউন্ট সেটআপ সফল হয়েছে!' : 'Admin account setup successful!', 'success');
+      } else {
+        await loginWithEmail(targetEmail, adminPassword);
+        onToast(language === 'bn' ? 'অ্যাডমিন লগইন সফল হয়েছে!' : 'Admin login successful', 'success');
+      }
+    } catch (err: unknown) {
+      console.warn('Admin Direct Login notice:', (err as any)?.message || err);
+      const msg = formatAuthError(err, language);
+      setAdminAuthError(msg);
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const currentHost = getCurrentHostname();
+
+  return (
+    <div className="min-h-screen bg-stone-100 py-16 px-4 flex items-center justify-center">
+      <div className="max-w-md w-full bg-white rounded-3xl border border-stone-200 p-8 shadow-sm space-y-6">
+        <div className="text-center space-y-2">
+          <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-900 mx-auto flex items-center justify-center">
+            <ShieldCheck className="w-8 h-8 text-amber-700" />
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-stone-900">
+            {language === 'bn' ? 'অ্যাডমিন প্যানেল প্রবেশাধিকার' : 'Admin Portal Access'}
+          </h2>
+          <p className="text-xs text-stone-500">
+            {language === 'bn'
+              ? 'এই প্যানেলটি শুধুমাত্র অনুমোদিত অ্যাডমিনিস্ট্রেটরদের জন্য সংরক্ষিত।'
+              : 'Restricted area. Please sign in with an authorized administrator account.'}
+          </p>
+        </div>
+
+        {/* Mode Switch Tabs */}
+        <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => {
+              setAdminMode('login');
+              setAdminAuthError('');
+              setIsGoogleDomainError(false);
+            }}
+            className={`flex-1 py-2 rounded-lg transition-colors cursor-pointer ${
+              adminMode === 'login' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            {language === 'bn' ? 'অ্যাডমিন লগইন' : 'Admin Login'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAdminMode('setup');
+              setAdminAuthError('');
+              setIsGoogleDomainError(false);
+            }}
+            className={`flex-1 py-2 rounded-lg transition-colors cursor-pointer ${
+              adminMode === 'setup' ? 'bg-white text-amber-800 shadow-xs' : 'text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            {language === 'bn' ? 'প্রথমবার সেটআপ (Setup)' : 'First-time Setup'}
+          </button>
+        </div>
+
+        {/* Google Unauthorized Domain Helper Card */}
+        {isGoogleDomainError && (
+          <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2.5 text-stone-800">
+            <div className="flex items-center gap-2 font-bold text-amber-900">
+              <Globe className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>
+                {language === 'bn' ? 'গুগল সাইন-ইন ডোমেন নির্দেশিকা' : 'Google Sign-In Domain Setup'}
+              </span>
+            </div>
+            <p className="text-[11px] text-stone-600 leading-relaxed">
+              {language === 'bn'
+                ? 'গুগল পপ-আপ সাইন-ইনের জন্য Firebase Console-এ আপনার বর্তমান ডোমেনটি Authorized domains তালিকায় যোগ করতে হবে:'
+                : 'For Google Sign-In popup, add this preview domain to Firebase Authorized domains:'}
+            </p>
+            <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-amber-200 font-mono text-[11px] text-stone-700 break-all">
+              <span className="truncate">{currentHost || window.location.hostname}</span>
+              <button
+                type="button"
+                onClick={handleCopyHostname}
+                className="shrink-0 px-2 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg font-sans text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                {domainCopied ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-300" />
+                    <span>{language === 'bn' ? 'কপি হয়েছে' : 'Copied'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    <span>{language === 'bn' ? 'কপি ডোমেন' : 'Copy'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-[10px] text-stone-500">
+              💡 {language === 'bn'
+                ? 'অথবা নিচের ফর্মে ইমেইল ও পাসওয়ার্ড দিয়ে সরাসরি অ্যাডমিন হিসেবে সাইন ইন করুন।'
+                : 'Or sign in directly below with your email and password.'}
+            </p>
+          </div>
+        )}
+
+        {adminAuthError && !isGoogleDomainError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs space-y-1.5">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{adminAuthError}</span>
+            </div>
+            {adminMode === 'login' && isInvalidCredentialError(adminAuthError) && (
+              <div className="pt-1 border-t border-rose-200/60 pl-6 flex items-center justify-between">
+                <span className="text-[11px] text-stone-600">
+                  {language === 'bn' ? 'প্রথমবার লগইন করছেন?' : 'First time signing in?'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminMode('setup');
+                    setAdminAuthError('');
+                  }}
+                  className="text-[11px] font-bold text-amber-800 hover:underline cursor-pointer"
+                >
+                  {language === 'bn' ? 'পাসওয়ার্ড সেটআপ করুন' : 'Setup Password'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleAdminDirectLogin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
+              {language === 'bn' ? 'অ্যাডমিন ইমেইল *' : 'Admin Email *'}
+            </label>
+            <input
+              type="email"
+              required
+              value={adminEmail}
+              onChange={(e) => setAdminEmail(e.target.value)}
+              placeholder="bajajmotors.chu@gmail.com"
+              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
+              {adminMode === 'setup'
+                ? (language === 'bn' ? 'নতুন পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর) *' : 'New Password (min 6 characters) *')
+                : (language === 'bn' ? 'পাসওয়ার্ড *' : 'Password *')}
+            </label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={adminAuthLoading}
+            className="w-full py-3 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all disabled:opacity-50 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-300" />
+            <span>
+              {adminAuthLoading
+                ? (language === 'bn' ? 'যাচাই করা হচ্ছে...' : 'Processing...')
+                : adminMode === 'setup'
+                ? (language === 'bn' ? 'অ্যাডমিন পাসওয়ার্ড সেটআপ করুন' : 'Setup Admin Password')
+                : (language === 'bn' ? 'অ্যাডমিন হিসেবে লগইন করুন' : 'Sign in as Admin')}
+            </span>
+          </button>
+        </form>
+
+        <div className="pt-2 border-t border-stone-100 text-center">
+          <button
+            type="button"
+            disabled={adminAuthLoading}
+            onClick={async () => {
+              try {
+                setAdminAuthLoading(true);
+                setIsGoogleDomainError(false);
+                setAdminAuthError('');
+                await loginWithGoogle();
+              } catch (e: unknown) {
+                console.warn('Admin Google Sign-In notice:', (e as any)?.message || e);
+                if (isUnauthorizedDomainError(e)) {
+                  setIsGoogleDomainError(true);
+                }
+                setAdminAuthError(formatAuthError(e, language));
+              } finally {
+                setAdminAuthLoading(false);
+              }
+            }}
+            className="w-full py-2.5 px-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60 cursor-pointer"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            </svg>
+            <span>{adminAuthLoading ? 'যাচাই করা হচ্ছে...' : 'Google Admin Sign In'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
   onViewInvoice,
   onToast,
 }) => {
   const { language, formatPrice, t } = useLanguage();
-  const { user, isAdmin, loginWithEmail, loginWithGoogle } = useAuth();
-
-  // Admin Login gate states (if user is not admin)
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [adminAuthLoading, setAdminAuthLoading] = useState(false);
-  const [adminAuthError, setAdminAuthError] = useState('');
+  const { user } = useAuth();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<
@@ -194,8 +445,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Directly load and subscribe to Firestore orders for admin (Source of Truth: Firestore)
   useEffect(() => {
-    if (!isAdmin) return;
-
     setOrdersLoading(true);
     storageService.fetchAdminOrders()
       .then((list) => {
@@ -204,7 +453,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setOrdersError(null);
       })
       .catch((err) => {
-        console.error('Admin initial orders fetch notice:', err);
+        console.warn('Admin initial orders fetch notice:', err);
         setOrdersLoading(false);
       });
 
@@ -216,7 +465,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setOrdersError(null);
       },
       (err) => {
-        console.error('Admin orders listener notice:', err);
+        console.warn('Admin orders listener notice:', err);
         setOrdersError(err.message);
         setOrdersLoading(false);
       }
@@ -225,7 +474,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return () => {
       unsubscribeFirestoreOrders();
     };
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => {
     const unsub = storageService.subscribe(() => {
@@ -238,117 +487,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
     return unsub;
   }, []);
-
-  const handleAdminDirectLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminAuthError('');
-    try {
-      setAdminAuthLoading(true);
-      await loginWithEmail(adminEmail.trim(), adminPassword);
-      onToast('Admin login successful', 'success');
-    } catch (err: unknown) {
-      console.error('❌ Admin Direct Login Error:', err);
-      setAdminAuthError(formatAuthError(err, language));
-    } finally {
-      setAdminAuthLoading(false);
-    }
-  };
-
-  // Guard: If not admin, render secure Admin Login screen
-  if (!isAdmin) {
-    return (
-      <div className="min-h-screen bg-stone-100 py-16 px-4 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-3xl border border-stone-200 p-8 shadow-sm space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-900 mx-auto flex items-center justify-center">
-              <ShieldCheck className="w-8 h-8 text-amber-700" />
-            </div>
-            <h2 className="font-serif text-2xl font-bold text-stone-900">
-              {language === 'bn' ? 'অ্যাডমিন প্যানেল প্রবেশাধিকার' : 'Admin Portal Access'}
-            </h2>
-            <p className="text-xs text-stone-500">
-              {language === 'bn'
-                ? 'এই প্যানেলটি শুধুমাত্র অনুমোদিত অ্যাডমিনিস্ট্রেটরদের জন্য সংরক্ষিত।'
-                : 'Restricted area. Please sign in with an authorized administrator account.'}
-            </p>
-          </div>
-
-          {adminAuthError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{adminAuthError}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleAdminDirectLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                {language === 'bn' ? 'অ্যাডমিন ইমেইল *' : 'Admin Email *'}
-              </label>
-              <input
-                type="email"
-                required
-                value={adminEmail}
-                onChange={(e) => setAdminEmail(e.target.value)}
-                placeholder="bajajmotors.chu@gmail.com"
-                className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                {language === 'bn' ? 'পাসওয়ার্ড *' : 'Password *'}
-              </label>
-              <input
-                type="password"
-                required
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={adminAuthLoading}
-              className="w-full py-3 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all disabled:opacity-50"
-            >
-              <ShieldCheck className="w-4 h-4 text-amber-300" />
-              <span>{adminAuthLoading ? 'যাচাই করা হচ্ছে...' : 'অ্যাডমিন হিসেবে লগইন করুন'}</span>
-            </button>
-          </form>
-
-          <div className="pt-2 border-t border-stone-100 text-center">
-            <button
-              type="button"
-              disabled={adminAuthLoading}
-              onClick={async () => {
-                try {
-                  setAdminAuthLoading(true);
-                  await loginWithGoogle();
-                } catch (e: unknown) {
-                  console.error('❌ Admin Google Sign-In Error:', e);
-                  setAdminAuthError(formatAuthError(e, language));
-                } finally {
-                  setAdminAuthLoading(false);
-                }
-              }}
-              className="w-full py-2.5 px-3 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60 cursor-pointer"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>{adminAuthLoading ? 'যাচাই করা হচ্ছে...' : 'Google Admin Sign In'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // =========================================================================
   // 1. ORDERS MANAGEMENT STATE & HANDLERS
@@ -956,7 +1094,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSettingsForm(saved);
       setSettingsLoaded(true);
     }).catch((err) => {
-      console.error('Settings initial Firestore load failed:', err?.code, err?.message);
+      console.warn('Settings initial Firestore load fallback:', err?.code, err?.message);
       if (active) {
         setSettingsForm(storageService.getSettings());
         setSettingsLoaded(true);
@@ -2438,7 +2576,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="space-y-0.5">
                 <span className="text-[10px] uppercase tracking-wider font-bold text-stone-400">Firebase Backend Project</span>
-                <p className="font-mono font-bold text-stone-900">{app.options.projectId || 'minarul-fashion-house-f5101'} (Live)</p>
+                <p className="font-mono font-bold text-stone-900">{app.options.projectId || 'minarulfashion'} (Live)</p>
                 <p className="text-stone-500 text-[11px]">Firestore Database • Firebase Auth • Cloud Storage Active</p>
               </div>
               <div className="flex items-center gap-2">
@@ -3341,4 +3479,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
     </div>
   );
+};
+
+export const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
+  const { isAdmin } = useAuth();
+
+  if (!isAdmin) {
+    return <AdminLoginScreen onToast={props.onToast} />;
+  }
+
+  return <AdminDashboardMain {...props} />;
 };

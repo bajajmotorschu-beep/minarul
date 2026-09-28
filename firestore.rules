@@ -12,11 +12,13 @@ service cloud.firestore {
     }
 
     // Admin authorization check:
-    // Strictly determined from Firestore users/{uid}.role == 'admin'
+    // Strictly determined from Firestore users/{uid}.role == 'admin' or verified store owner email
     function isAdmin() {
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+      return isSignedIn() && (
+        (request.auth.token.email == "bajajmotors.chu@gmail.com") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
+      );
     }
 
     // Default deny catch-all

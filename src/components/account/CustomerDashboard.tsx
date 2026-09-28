@@ -13,14 +13,22 @@ import {
   ArrowRight,
   ShieldCheck,
   FileText,
-  Loader2
+  Loader2,
+  Globe,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { storageService } from '../../services/storageService';
 import { Order, Product } from '../../types';
 import { bangladeshDivisions } from '../../data/bangladeshLocations';
-import { formatAuthError } from '../../utils/authErrors';
+import { 
+  formatAuthError, 
+  isUnauthorizedDomainError, 
+  getCurrentHostname,
+  isInvalidCredentialError 
+} from '../../utils/authErrors';
 
 interface CustomerDashboardProps {
   initialTab?: 'orders' | 'profile' | 'wishlist';
@@ -58,6 +66,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [loginEmailOrPhone, setLoginEmailOrPhone] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [authErrorBanner, setAuthErrorBanner] = useState('');
+  const [isGoogleDomainError, setIsGoogleDomainError] = useState(false);
+  const [domainCopied, setDomainCopied] = useState(false);
+
+  const handleCopyHostname = () => {
+    const host = getCurrentHostname();
+    if (host && navigator.clipboard) {
+      navigator.clipboard.writeText(host);
+      setDomainCopied(true);
+      setTimeout(() => setDomainCopied(false), 3000);
+    }
+  };
 
   // Sync state whenever user changes (e.g. login or logout)
   useEffect(() => {
@@ -68,6 +88,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       setDivision(user.address?.division || 'Dhaka');
       setDistrict(user.address?.district || 'Dhaka City (ঢাকা সিটি)');
       setAddress(user.address?.address || '');
+      setAuthErrorBanner('');
+      setIsGoogleDomainError(false);
     }
   }, [user]);
 
@@ -163,14 +185,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
     try {
       setAuthLoading(true);
+      setAuthErrorBanner('');
+      setIsGoogleDomainError(false);
       await loginWithEmail(loginEmailOrPhone.trim(), loginPassword);
       onToast(
         language === 'bn' ? 'লগইন সফল হয়েছে!' : 'Logged in successfully!',
         'success'
       );
     } catch (err: unknown) {
-      console.error('❌ CustomerDashboard Direct Login Error:', err);
-      onToast(formatAuthError(err, language), 'error');
+      console.warn('CustomerDashboard direct login notice:', (err as any)?.message || err);
+      const msg = formatAuthError(err, language);
+      setAuthErrorBanner(msg);
+      onToast(msg, 'error');
     } finally {
       setAuthLoading(false);
     }
@@ -178,6 +204,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   // If customer is not logged in, render the login & welcome portal
   if (!isLoggedIn || !user) {
+    const currentHost = getCurrentHostname();
+
     return (
       <div className="bg-stone-100/60 py-16 min-h-screen flex items-center justify-center">
         <div className="max-w-md w-full mx-4 bg-white rounded-3xl border border-stone-200 p-8 shadow-sm space-y-6">
@@ -194,6 +222,54 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 : 'Sign in to access your orders and profile'}
             </p>
           </div>
+
+          {/* Unauthorized Google Domain Helper */}
+          {isGoogleDomainError && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2 text-stone-800">
+              <div className="flex items-center gap-2 font-bold text-amber-900">
+                <Globe className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  {language === 'bn' ? 'গুগল সাইন-ইন ডোমেন নির্দেশিকা' : 'Google Sign-In Domain Setup'}
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-600 leading-relaxed">
+                {language === 'bn'
+                  ? 'গুগল পপ-আপ সাইন-ইনের জন্য Firebase Console-এ আপনার বর্তমান ডোমেনটি Authorized domains তালিকায় যোগ করতে হবে:'
+                  : 'For Google Sign-In popup, add this preview domain to Firebase Authorized domains:'}
+              </p>
+              <div className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-amber-200 font-mono text-[11px] text-stone-700 break-all">
+                <span className="truncate">{currentHost || window.location.hostname}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyHostname}
+                  className="shrink-0 px-2 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded-lg font-sans text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  {domainCopied ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-300" />
+                      <span>{language === 'bn' ? 'কপি হয়েছে' : 'Copied'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>{language === 'bn' ? 'কপি ডোমেন' : 'Copy'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-[10px] text-stone-500">
+                💡 {language === 'bn'
+                  ? 'অথবা নিচের ফর্ম থেকে সরাসরি মোবাইল নম্বর/ইমেইল ও পাসওয়ার্ড দিয়ে সাইন ইন করুন।'
+                  : 'Or sign in below directly with your mobile number/email and password.'}
+              </p>
+            </div>
+          )}
+
+          {authErrorBanner && !isGoogleDomainError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-start gap-2">
+              <span className="leading-relaxed">{authErrorBanner}</span>
+            </div>
+          )}
 
           <form onSubmit={handleDirectLogin} className="space-y-4">
             <div>
@@ -257,14 +333,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               onClick={async () => {
                 try {
                   setAuthLoading(true);
+                  setIsGoogleDomainError(false);
+                  setAuthErrorBanner('');
                   await loginWithGoogle();
                   onToast(
                     language === 'bn' ? 'গুগল লগইন সফল হয়েছে!' : 'Google login successful',
                     'success'
                   );
                 } catch (e: unknown) {
-                  console.error('❌ CustomerDashboard Google Login Error:', e);
-                  onToast(formatAuthError(e, language), 'error');
+                  console.warn('CustomerDashboard Google Login notice:', (e as any)?.message || e);
+                  if (isUnauthorizedDomainError(e)) {
+                    setIsGoogleDomainError(true);
+                  }
+                  const formatted = formatAuthError(e, language);
+                  setAuthErrorBanner(formatted);
+                  onToast(formatted, 'error');
                 } finally {
                   setAuthLoading(false);
                 }

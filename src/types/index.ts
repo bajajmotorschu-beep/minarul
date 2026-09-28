@@ -129,17 +129,22 @@ export interface Coupon {
 export interface Review {
   id: string;
   productId: string;
+  userId?: string;
+  customerId?: string;
   userName: string;
   userPhoneMasked?: string;
   rating: number;
   comment: string;
+  imageUrl?: string;
+  productPhoto?: string;
   date: string;
   verifiedPurchase: boolean;
+  createdAt?: any;
 }
 
 export interface Supplier {
   id: string;
-  supplierId: string;
+  supplierId?: string;
   name: string;
   companyName?: string;
   phone: string;
@@ -162,7 +167,7 @@ export interface PurchaseItem {
 
 export interface Purchase {
   id: string;
-  purchaseId: string;
+  purchaseId?: string;
   supplierId: string;
   supplierName: string;
   purchaseDate: string;
@@ -176,7 +181,7 @@ export interface Purchase {
   dueAmount: number;
   paymentMethod: string;
   notes?: string;
-  createdBy: string;
+  createdBy?: string;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -204,7 +209,7 @@ export interface Sale {
 
 export interface Expense {
   id: string;
-  expenseId: string;
+  expenseId?: string;
   category: string;
   description: string;
   amount: number;
@@ -212,7 +217,7 @@ export interface Expense {
   expenseDate: string;
   reference?: string;
   notes?: string;
-  createdBy: string;
+  createdBy?: string;
   createdAt?: any;
   updatedAt?: any;
 }

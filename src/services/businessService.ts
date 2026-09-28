@@ -90,8 +90,9 @@ export const businessService = {
 
       for (let i = 0; i < order.items.length; i++) {
         const item = order.items[i];
-        const p = productSnaps[i].exists() ? productSnaps[i].data() : {};
-        const currentStock = Number(p.stockQuantity ?? p.stock ?? item.stock ?? 0);
+        const snap = productSnaps[i];
+        const p: any = snap && snap.exists() ? snap.data() : {};
+        const currentStock = Number(p.stockQuantity ?? p.stock ?? 0);
         const quantity = Number(item.quantity) || 0;
         if (currentStock < quantity) throw new Error(`INSUFFICIENT_STOCK:${item.titleEn || item.titleBn || item.productId}`);
         const costPrice = Number(p.purchasePrice ?? p.costPrice ?? item.price ?? 0);
