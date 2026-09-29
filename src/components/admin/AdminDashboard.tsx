@@ -59,11 +59,15 @@ import {
   HeroSlide,
   Review,
   ProductColor,
-  User
+  User,
+  Supplier,
+  CashTransaction,
+  OpeningBalances
 } from '../../types';
 import { app, db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
+import { businessService } from '../../services/businessService';
 import { BusinessManagement } from './BusinessManagement';
 import { StockManagement } from './StockManagement';
 import { PurchasesManagement } from './PurchasesManagement';
@@ -435,7 +439,36 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
   const [settings, setSettings] = useState<SiteSettings>(() => storageService.getSettings());
   const [reviews, setReviews] = useState<Review[]>(() => storageService.getReviews());
   const [users, setUsers] = useState<User[]>(() => storageService.getUsers());
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [cashTxList, setCashTxList] = useState<CashTransaction[]>([]);
+  const [openingBalances, setOpeningBalances] = useState<OpeningBalances>({
+    openingCash: 0,
+    openingBkash: 0,
+    openingNagad: 0,
+    openingRocket: 0,
+    openingBank: 0,
+    openingSupplierDue: 0,
+    openingStockValue: 0,
+  });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  useEffect(() => {
+    const loadBusinessData = async () => {
+      try {
+        const [suList, ctxList, ob] = await Promise.all([
+          businessService.getSuppliers(),
+          businessService.getCashTransactions(),
+          businessService.getOpeningBalances(),
+        ]);
+        setSuppliers(suList);
+        setCashTxList(ctxList);
+        setOpeningBalances(ob);
+      } catch (err) {
+        console.warn('Business metrics load notice:', err);
+      }
+    };
+    loadBusinessData();
+  }, [activeTab]);
 
   // In-app Custom Confirmation Modal state (Replaces window.confirm)
   const [confirmModal, setConfirmModal] = useState<{
@@ -1166,7 +1199,62 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
     );
   };
 
-  // Metrics
+  // Business, Accounting & Stock Metrics (Section 21 Top Cards)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayOrders = useMemo(() => {
+    return orders.filter((o) => {
+      const d = o.createdAt ? o.createdAt.slice(0, 10) : '';
+      return d === todayStr && o.orderStatus !== 'cancelled';
+    });
+  }, [orders, todayStr]);
+
+  const todaySales = useMemo(() => {
+    return todayOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+  }, [todayOrders]);
+
+  const todayProfit = useMemo(() => {
+    const todayCost = todayOrders.reduce((sum, o) => {
+      const itemCost = (o.items || []).reduce((isum, item) => {
+        const prod = products.find((p) => p.id === item.productId);
+        const unitCost = Number(prod?.purchasePrice ?? (prod?.price || 0) * 0.7);
+        return isum + unitCost * (Number(item.quantity) || 1);
+      }, 0);
+      return sum + itemCost;
+    }, 0);
+    return Math.max(0, todaySales - todayCost);
+  }, [todayOrders, todaySales, products]);
+
+  const accountBalances = useMemo(() => {
+    return businessService.calculateAccountBalances(cashTxList, openingBalances);
+  }, [cashTxList, openingBalances]);
+
+  const totalStockValue = useMemo(() => {
+    return products.reduce((sum, p) => {
+      const qty = Number(p.stockQuantity ?? p.stock ?? 0);
+      const cost = Number(p.purchasePrice ?? (p.price || 0) * 0.7);
+      return sum + qty * cost;
+    }, 0);
+  }, [products]);
+
+  const totalSupplierDue = useMemo(() => {
+    return suppliers.reduce((sum, s) => {
+      return sum + Number(s.currentDue ?? s.openingDue ?? 0);
+    }, 0);
+  }, [suppliers]);
+
+  const lowStockCount = useMemo(() => {
+    return products.filter((p) => {
+      const qty = Number(p.stockQuantity ?? p.stock ?? 0);
+      return qty <= Number(p.minimumStock ?? 5);
+    }).length;
+  }, [products]);
+
+  const totalCustomersCount = useMemo(() => {
+    const uniqueOrderCustomers = new Set(orders.map((o) => o.customerPhone || o.customerId).filter(Boolean));
+    return Math.max(users.filter((u) => u.role !== 'admin').length, uniqueOrderCustomers.size);
+  }, [users, orders]);
+
+  // Overall Metrics
   const totalRevenue = orders
     .filter((o) => o.orderStatus !== 'cancelled')
     .reduce((sum, o) => sum + o.totalAmount, 0);
@@ -1195,8 +1283,8 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
               </div>
               <p className="text-xs text-stone-500 mt-0.5">
                 {language === 'bn'
-                  ? 'সকল পণ্য যুক্ত, পরিবর্তন, মোছা এবং কাস্টমার অর্ডার ব্যবস্থাপনার কেন্দ্রীয় প্যানেল'
-                  : 'Complete product catalog management (Add/Edit/Delete), order tracking & gateway control'}
+                  ? 'সকল পণ্য, ইনভেন্টরি, পারচেজ, ক্যাশ ও কাস্টমার অর্ডার ব্যবস্থাপনার কেন্দ্রীয় প্যানেল'
+                  : 'Complete product catalog, inventory, purchases, cash in hand & order management'}
               </p>
             </div>
           </div>
@@ -1228,57 +1316,129 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* 4 Overview Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+        {/* 8 Section 21 Overview Metric Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
+          {/* 1. Today's Sales */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
             <div className="flex items-center justify-between text-stone-500 text-xs">
-              <span>{t.totalRevenue}</span>
+              <span className="font-semibold">{language === 'bn' ? 'আজকের বিক্রয়' : "Today's Sales"}</span>
               <TrendingUp className="w-4 h-4 text-emerald-600" />
             </div>
-            <div className="text-2xl font-extrabold text-stone-950 font-serif">
-              {formatPrice(totalRevenue)}
+            <div className="text-xl sm:text-2xl font-extrabold text-stone-950 font-serif">
+              {formatPrice(todaySales)}
             </div>
-            <span className="text-[10px] text-emerald-600 font-semibold">
-              From {orders.length} total orders
+            <span className="text-[10px] text-emerald-700 font-semibold">
+              {todayOrders.length} {language === 'bn' ? 'অর্ডার আজ' : 'orders today'}
             </span>
           </div>
 
-          <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+          {/* 2. Today's Orders */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
             <div className="flex items-center justify-between text-stone-500 text-xs">
-              <span>{t.pendingOrders}</span>
-              <Clock className="w-4 h-4 text-amber-600" />
+              <span className="font-semibold">{language === 'bn' ? 'আজকের অর্ডার' : "Today's Orders"}</span>
+              <ShoppingBag className="w-4 h-4 text-amber-600" />
             </div>
-            <div className="text-2xl font-extrabold text-stone-950 font-serif">
-              {pendingOrdersCount}
+            <div className="text-xl sm:text-2xl font-extrabold text-stone-950 font-serif">
+              {todayOrders.length}
             </div>
             <span className="text-[10px] text-amber-700 font-semibold">
-              Awaiting packaging / confirmation
+              {pendingOrdersCount} {language === 'bn' ? 'পেন্ডিং প্রসেসিং' : 'pending packaging'}
             </span>
           </div>
 
-          <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+          {/* 3. Today's Profit */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
             <div className="flex items-center justify-between text-stone-500 text-xs">
-              <span>Shipped & Out for Delivery</span>
-              <Truck className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold">{language === 'bn' ? 'আজকের মোট লাভ' : "Today's Profit"}</span>
+              <BarChart3 className="w-4 h-4 text-purple-600" />
             </div>
-            <div className="text-2xl font-extrabold text-stone-950 font-serif">
-              {shippedOrdersCount}
-            </div>
-            <span className="text-[10px] text-blue-700 font-semibold">
-              {deliveredOrdersCount} delivered successfully
-            </span>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
-            <div className="flex items-center justify-between text-stone-500 text-xs">
-              <span>{t.activeProducts}</span>
-              <Package className="w-4 h-4 text-amber-700" />
-            </div>
-            <div className="text-2xl font-extrabold text-stone-950 font-serif">
-              {products.length}
+            <div className="text-xl sm:text-2xl font-extrabold text-emerald-700 font-serif">
+              {formatPrice(todayProfit)}
             </div>
             <span className="text-[10px] text-stone-500">
-              {slides.length} banners • {coupons.length} coupons
+              {language === 'bn' ? 'গ্রস প্রফিট এস্টিমেট' : 'Gross profit estimate'}
+            </span>
+          </div>
+
+          {/* 4. Cash in Hand */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-teal-200 shadow-xs space-y-1 bg-gradient-to-br from-white to-teal-50/30">
+            <div className="flex items-center justify-between text-teal-800 text-xs font-bold">
+              <span>{language === 'bn' ? 'ক্যাশ ইন হ্যান্ড' : 'Cash in Hand'}</span>
+              <Wallet className="w-4 h-4 text-teal-700" />
+            </div>
+            <div className="text-xl sm:text-2xl font-extrabold text-teal-950 font-serif">
+              {formatPrice(accountBalances.cashInHand)}
+            </div>
+            <span className="text-[10px] text-teal-700 font-semibold">
+              {language === 'bn' ? 'প্রকৃত হাতে নগদ' : 'Actual cash held'}
+            </span>
+          </div>
+
+          {/* 5. Stock Value */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+            <div className="flex items-center justify-between text-stone-500 text-xs">
+              <span className="font-semibold">{language === 'bn' ? 'মোট স্টক ভ্যালু' : 'Stock Value'}</span>
+              <Boxes className="w-4 h-4 text-amber-700" />
+            </div>
+            <div className="text-xl sm:text-2xl font-extrabold text-stone-950 font-serif">
+              {formatPrice(totalStockValue)}
+            </div>
+            <span className="text-[10px] text-stone-500">
+              {products.length} {language === 'bn' ? 'টি পোশাক ক্যাটালগে' : 'products in catalog'}
+            </span>
+          </div>
+
+          {/* 6. Supplier Due */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+            <div className="flex items-center justify-between text-stone-500 text-xs">
+              <span className="font-semibold">{language === 'bn' ? 'সাপ্লায়ার বকেয়া' : 'Supplier Due'}</span>
+              <Truck className="w-4 h-4 text-rose-600" />
+            </div>
+            <div className="text-xl sm:text-2xl font-extrabold text-rose-700 font-serif">
+              {formatPrice(totalSupplierDue)}
+            </div>
+            <span className="text-[10px] text-rose-600 font-semibold">
+              {suppliers.length} {language === 'bn' ? 'জন সাপ্লায়ার' : 'suppliers registered'}
+            </span>
+          </div>
+
+          {/* 7. Total Customers */}
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-stone-200 shadow-xs space-y-1">
+            <div className="flex items-center justify-between text-stone-500 text-xs">
+              <span className="font-semibold">{language === 'bn' ? 'মোট গ্রাহক' : 'Total Customers'}</span>
+              <UsersIcon className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="text-xl sm:text-2xl font-extrabold text-stone-950 font-serif">
+              {totalCustomersCount}
+            </div>
+            <span className="text-[10px] text-stone-500">
+              {deliveredOrdersCount} {language === 'bn' ? 'সফল ডেলিভারি' : 'delivered orders'}
+            </span>
+          </div>
+
+          {/* 8. Low Stock Items */}
+          <div className={`p-4 sm:p-5 rounded-3xl border shadow-xs space-y-1 ${
+            lowStockCount > 0
+              ? 'bg-rose-50/70 border-rose-200 text-rose-900'
+              : 'bg-white border-stone-200'
+          }`}>
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className={lowStockCount > 0 ? 'text-rose-700 font-bold' : 'text-stone-500'}>
+                {language === 'bn' ? 'কম স্টক অ্যালার্ট' : 'Low Stock Items'}
+              </span>
+              <AlertCircle className={`w-4 h-4 ${lowStockCount > 0 ? 'text-rose-600' : 'text-stone-400'}`} />
+            </div>
+            <div className={`text-xl sm:text-2xl font-extrabold font-serif ${
+              lowStockCount > 0 ? 'text-rose-700' : 'text-stone-950'
+            }`}>
+              {lowStockCount}
+            </div>
+            <span className={`text-[10px] font-semibold ${
+              lowStockCount > 0 ? 'text-rose-700' : 'text-stone-500'
+            }`}>
+              {lowStockCount > 0
+                ? (language === 'bn' ? 'পুনরায় পারচেজ প্রয়োজন' : 'Requires reordering')
+                : (language === 'bn' ? 'সব পোশাকে পর্যাপ্ত স্টক' : 'Adequate stock level')}
             </span>
           </div>
         </div>

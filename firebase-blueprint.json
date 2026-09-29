@@ -183,6 +183,90 @@
         "paymentMethod": { "type": "string" }
       },
       "required": ["transactionId", "type", "amount", "paymentMethod"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Product vendor and supplier profiles",
+      "type": "object",
+      "properties": {
+        "supplierId": { "type": "string" },
+        "name": { "type": "string" },
+        "companyName": { "type": "string" },
+        "phone": { "type": "string" },
+        "openingDue": { "type": "number" },
+        "currentDue": { "type": "number" }
+      },
+      "required": ["name", "phone", "openingDue"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Stock purchase order and inbound inventory record",
+      "type": "object",
+      "properties": {
+        "purchaseId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierName": { "type": "string" },
+        "purchaseDate": { "type": "string" },
+        "items": { "type": "array" },
+        "grandTotal": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "dueAmount": { "type": "number" }
+      },
+      "required": ["purchaseId", "supplierId", "items", "grandTotal"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operational business expense record",
+      "type": "object",
+      "properties": {
+        "expenseId": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "expenseDate": { "type": "string" }
+      },
+      "required": ["expenseId", "category", "amount", "paymentMethod"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Recorded customer order sale with COGS and gross profit",
+      "type": "object",
+      "properties": {
+        "saleId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "grossProfit": { "type": "number" }
+      },
+      "required": ["saleId", "orderId", "totalAmount"]
+    },
+    "SupplierPayment": {
+      "title": "SupplierPayment",
+      "description": "Payment made to product supplier against dues",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "paymentAmount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["paymentId", "supplierId", "paymentAmount", "paymentMethod"]
+    },
+    "StockAdjustment": {
+      "title": "StockAdjustment",
+      "description": "Manual inventory adjustment and correction record",
+      "type": "object",
+      "properties": {
+        "adjustmentId": { "type": "string" },
+        "productId": { "type": "string" },
+        "adjustmentType": { "type": "string" },
+        "quantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "reason": { "type": "string" }
+      },
+      "required": ["adjustmentId", "productId", "adjustmentType", "quantity"]
     }
   },
   "firestore": {
@@ -222,9 +306,37 @@
       "schema": "StockMovement",
       "description": "Inventory movements"
     },
+    "/stockAdjustments/{adjustmentId}": {
+      "schema": "StockAdjustment",
+      "description": "Stock adjustments and counts"
+    },
     "/cashTransactions/{transactionId}": {
       "schema": "CashTransaction",
       "description": "Cash transactions"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Suppliers and vendors"
+    },
+    "/purchases/{purchaseId}": {
+      "schema": "Purchase",
+      "description": "Inbound stock purchases"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Operating expenses"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Recorded order sales with COGS"
+    },
+    "/supplierPayments/{paymentId}": {
+      "schema": "SupplierPayment",
+      "description": "Supplier payment receipts"
+    },
+    "/accounts/{accountId}": {
+      "schema": "object",
+      "description": "Financial opening balances and account setups"
     }
   }
 }

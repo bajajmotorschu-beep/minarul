@@ -151,6 +151,7 @@ export interface Supplier {
   email?: string;
   address?: string;
   openingDue: number;
+  currentDue?: number;
   notes?: string;
   createdAt?: any;
   updatedAt?: any;
