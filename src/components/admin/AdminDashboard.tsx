@@ -33,7 +33,10 @@ import {
   Eye,
   Upload,
   Users as UsersIcon,
-  Globe
+  Globe,
+  Boxes,
+  Wallet,
+  CircleDollarSign
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
@@ -62,6 +65,12 @@ import { app, db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
 import { BusinessManagement } from './BusinessManagement';
+import { StockManagement } from './StockManagement';
+import { PurchasesManagement } from './PurchasesManagement';
+import { SuppliersManagement } from './SuppliersManagement';
+import { SalesManagement } from './SalesManagement';
+import { AccountsManagement } from './AccountsManagement';
+import { ReportsManagement } from './ReportsManagement';
 
 interface AdminDashboardProps {
   onViewInvoice: (order: Order) => void;
@@ -399,7 +408,21 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'business' | 'orders' | 'products' | 'slides' | 'coupons' | 'reviews' | 'settings' | 'users'
+    | 'overview'
+    | 'stock'
+    | 'purchases'
+    | 'suppliers'
+    | 'sales'
+    | 'accounts'
+    | 'reports'
+    | 'orders'
+    | 'products'
+    | 'business'
+    | 'slides'
+    | 'coupons'
+    | 'reviews'
+    | 'settings'
+    | 'users'
   >('overview');
 
   // Reactive Data
@@ -1261,7 +1284,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex flex-wrap border-b border-stone-200 gap-2 sm:gap-4 text-xs font-bold">
+        <div className="flex flex-wrap border-b border-stone-200 gap-1.5 sm:gap-2.5 text-xs font-bold py-1">
           <button
             onClick={() => setActiveTab('overview')}
             className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
@@ -1272,30 +1295,6 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
           >
             <Sliders className="w-3.5 h-3.5" />
             <span>{t.tabOverview}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('business')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'business'
-                ? 'border-amber-700 text-amber-800'
-                : 'border-transparent text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'হিসাব ও স্টক' : 'Business & Accounts'}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('products')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'products'
-                ? 'border-amber-700 text-amber-800'
-                : 'border-transparent text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            <Package className="w-3.5 h-3.5" />
-            <span>{t.tabProducts} ({products.length})</span>
           </button>
 
           <button
@@ -1311,6 +1310,103 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('products')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'products'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <Package className="w-3.5 h-3.5" />
+            <span>{t.tabProducts} ({products.length})</span>
+          </button>
+
+          {/* DEDICATED INVENTORY & ERP TABS */}
+          <button
+            onClick={() => setActiveTab('stock')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'stock'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <Boxes className="w-3.5 h-3.5 text-amber-600" />
+            <span>{language === 'bn' ? 'স্টক ম্যানেজমেন্ট' : 'Stock Management'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('purchases')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'purchases'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{language === 'bn' ? 'পারচেজ ও স্টক ইন' : 'Purchases / Stock In'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('suppliers')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'suppliers'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <Truck className="w-3.5 h-3.5 text-blue-600" />
+            <span>{language === 'bn' ? 'সাপ্লায়ার' : 'Suppliers'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('sales')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'sales'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
+            <span>{language === 'bn' ? 'সেলস রেকর্ড' : 'Sales Records'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('accounts')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'accounts'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <Wallet className="w-3.5 h-3.5 text-teal-600" />
+            <span>{language === 'bn' ? 'হিসাব ও ক্যাশ খাতা' : 'Accounts & Cash'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('reports')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'reports'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-purple-600" />
+            <span>{language === 'bn' ? 'রিপোর্ট ও লাভ-ক্ষতি' : 'Reports & P&L'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('business')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'business'
+                ? 'border-amber-700 text-amber-800'
+                : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <CircleDollarSign className="w-3.5 h-3.5 text-amber-700" />
+            <span>{language === 'bn' ? 'কুইক বিজনেস' : 'Quick Business'}</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('slides')}
             className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'slides'
@@ -1319,7 +1415,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <ImageIcon className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'ব্যানার স্লাইডার' : 'Hero Banners'} ({slides.length})</span>
+            <span>{language === 'bn' ? 'ব্যানার' : 'Hero Banners'} ({slides.length})</span>
           </button>
 
           <button
@@ -1343,7 +1439,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <MessageSquare className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'গ্রাহক রিভিউ' : 'Reviews'} ({reviews.length})</span>
+            <span>{language === 'bn' ? 'রিভিউ' : 'Reviews'} ({reviews.length})</span>
           </button>
 
           <button
@@ -1355,7 +1451,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'সাইট সেটিংস ও পেমেন্ট' : 'Site & Payment Settings'}</span>
+            <span>{language === 'bn' ? 'সেটিংস' : 'Settings'}</span>
           </button>
 
           <button
@@ -1367,7 +1463,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <UsersIcon className="w-3.5 h-3.5" />
-            <span>{language === 'bn' ? 'ইউজার ম্যানেজমেন্ট' : 'Users'} ({users.length})</span>
+            <span>{language === 'bn' ? 'ইউজার' : 'Users'} ({users.length})</span>
           </button>
         </div>
 
@@ -1516,8 +1612,56 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
         {/* TAB 2: PRODUCTS MANAGEMENT (ADD, EDIT, DELETE, DUPLICATE, STOCK) */}
         {/* ========================================================================= */}
         {/* ========================================================================= */}
-        {/* BUSINESS MANAGEMENT */}
+        {/* INVENTORY & BUSINESS MANAGEMENT MODULES */}
         {/* ========================================================================= */}
+        {activeTab === 'stock' && (
+          <StockManagement
+            products={products}
+            orders={orders}
+            onToast={onToast}
+            onRefreshProducts={() => setProducts(storageService.getProducts())}
+          />
+        )}
+
+        {activeTab === 'purchases' && (
+          <PurchasesManagement
+            products={products}
+            onToast={onToast}
+            onRefreshProducts={() => setProducts(storageService.getProducts())}
+          />
+        )}
+
+        {activeTab === 'suppliers' && (
+          <SuppliersManagement onToast={onToast} />
+        )}
+
+        {activeTab === 'sales' && (
+          <SalesManagement
+            orders={orders}
+            onToast={onToast}
+            onRefreshOrders={async () => {
+              try {
+                const fresh = await storageService.fetchAdminOrders();
+                setOrders(fresh);
+              } catch (e) {
+                console.warn('Refresh orders notice:', e);
+              }
+            }}
+          />
+        )}
+
+        {activeTab === 'accounts' && (
+          <AccountsManagement onToast={onToast} />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsManagement
+            products={products}
+            orders={orders}
+            onToast={onToast}
+          />
+        )}
+
         {activeTab === 'business' && (
           <BusinessManagement products={products} onToast={onToast} />
         )}

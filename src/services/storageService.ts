@@ -980,10 +980,14 @@ class StorageService {
       if (courierTrackingId !== undefined) updatePayload.courierTrackingId = courierTrackingId;
       if (courierName !== undefined) updatePayload.courierName = courierName;
       await updateDoc(doc(db, 'orders', orderId), updatePayload);
-      if (status === 'confirmed') {
+      if (['confirmed', 'shipped', 'delivered'].includes(status)) {
         const current = this.getOrders().find((o) => o.id === orderId);
         if (current) {
-          await businessService.ensureSaleForOrder({ ...current, orderStatus: status });
+          try {
+            await businessService.ensureSaleForOrder({ ...current, orderStatus: status });
+          } catch (syncErr) {
+            console.warn('Sale sync notice on order update:', syncErr);
+          }
         }
       }
       console.log('✅ FIRESTORE ORDER UPDATE SUCCESS:', orderId, status);
@@ -1012,6 +1016,16 @@ class StorageService {
         paymentStatus: status,
         updatedAt: serverTimestamp(),
       });
+      if (status === 'paid') {
+        const current = this.getOrders().find((o) => o.id === orderId);
+        if (current) {
+          try {
+            await businessService.ensureSaleForOrder({ ...current, paymentStatus: status });
+          } catch (syncErr) {
+            console.warn('Sale sync notice on payment update:', syncErr);
+          }
+        }
+      }
       console.log('✅ FIRESTORE PAYMENT STATUS UPDATE SUCCESS:', orderId, status);
 
       const orders = this.getOrders();

@@ -106,8 +106,11 @@ service cloud.firestore {
     match /suppliers/{supplierId} { allow read, write: if isAdmin(); }
     match /expenses/{expenseId} { allow read, write: if isAdmin(); }
     match /stockMovements/{movementId} { allow read, write: if isAdmin(); }
+    match /stockAdjustments/{adjustmentId} { allow read, write: if isAdmin(); }
     match /returns/{returnId} { allow read, write: if isAdmin(); }
     match /payments/{paymentId} { allow read, write: if isAdmin(); }
+    match /supplierPayments/{paymentId} { allow read, write: if isAdmin(); }
+    match /cashTransactions/{transactionId} { allow read, write: if isAdmin(); }
     match /accounts/{accountId} { allow read, write: if isAdmin(); }
 
     // ----------------- PHONE LOOKUP COLLECTION -----------------

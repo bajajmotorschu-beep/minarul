@@ -222,20 +222,122 @@ export interface Expense {
   updatedAt?: any;
 }
 
+export type StockMovementType =
+  | 'PURCHASE'
+  | 'SALE'
+  | 'SALE_RETURN'
+  | 'PURCHASE_RETURN'
+  | 'ADJUSTMENT_IN'
+  | 'ADJUSTMENT_OUT'
+  | 'DAMAGE'
+  | 'LOST'
+  | 'MANUAL_CORRECTION'
+  | string;
+
 export interface StockMovement {
   id?: string;
   movementId: string;
   productId: string;
   productName: string;
-  movementType: string;
+  type: StockMovementType;
+  movementType?: string; // backward compatibility
   quantity: number;
   previousStock: number;
   newStock: number;
-  referenceType?: string;
+  unitCost?: number;
+  totalValue?: number;
   referenceId?: string;
+  referenceType?: string;
   note?: string;
   createdBy?: string;
   createdAt?: any;
+}
+
+export interface StockAdjustment {
+  id: string;
+  adjustmentId: string;
+  productId: string;
+  productName: string;
+  sku?: string;
+  adjustmentType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'LOST' | 'MANUAL_CORRECTION';
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  unitCost: number;
+  totalValue: number;
+  reason: string;
+  note?: string;
+  createdBy?: string;
+  createdAt?: any;
+}
+
+export type CashTransactionType = 'CASH_IN' | 'CASH_OUT';
+
+export type CashTransactionCategory =
+  | 'COD_SALE'
+  | 'CUSTOMER_PAYMENT'
+  | 'OTHER_INCOME'
+  | 'SUPPLIER_PAYMENT'
+  | 'EXPENSE'
+  | 'OWNER_WITHDRAWAL'
+  | 'OPENING_BALANCE'
+  | 'OTHER';
+
+export type PaymentAccountMethod = 'CASH' | 'BKASH' | 'NAGAD' | 'ROCKET' | 'BANK' | 'OTHER';
+
+export interface CashTransaction {
+  id: string;
+  transactionId: string;
+  type: CashTransactionType;
+  category: CashTransactionCategory;
+  amount: number;
+  paymentMethod: PaymentAccountMethod;
+  referenceId?: string;
+  referenceType?: string;
+  description: string;
+  createdBy?: string;
+  createdAt?: any;
+}
+
+export interface SupplierPayment {
+  id: string;
+  paymentId: string;
+  supplierId: string;
+  supplierName: string;
+  currentDue: number;
+  paymentAmount: number;
+  remainingDue: number;
+  paymentMethod: PaymentAccountMethod;
+  paymentAccount?: string;
+  transactionId?: string;
+  date: string;
+  note?: string;
+  createdBy?: string;
+  createdAt?: any;
+}
+
+export interface OpeningBalances {
+  openingCash: number;
+  openingBkash: number;
+  openingNagad: number;
+  openingRocket: number;
+  openingBank: number;
+  openingSupplierDue: number;
+  openingStockValue: number;
+  updatedAt?: any;
+}
+
+export interface AccountBalancesSummary {
+  cashInHand: number;
+  bkashBalance: number;
+  nagadBalance: number;
+  rocketBalance: number;
+  bankBalance: number;
+  todayCashIn: number;
+  todayCashOut: number;
+  todayNetCash: number;
+  totalCashIn: number;
+  totalCashOut: number;
 }
 
 export interface SiteSettings {

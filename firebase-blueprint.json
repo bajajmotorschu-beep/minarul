@@ -155,6 +155,34 @@
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "phone"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Inventory movement log",
+      "type": "object",
+      "properties": {
+        "movementId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "type": { "type": "string" },
+        "quantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" }
+      },
+      "required": ["movementId", "productId", "type", "quantity"]
+    },
+    "CashTransaction": {
+      "title": "CashTransaction",
+      "description": "Cash in hand and account transactions",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "type": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" }
+      },
+      "required": ["transactionId", "type", "amount", "paymentMethod"]
     }
   },
   "firestore": {
@@ -189,6 +217,14 @@
     "/heroSlides/{slideId}": {
       "schema": "HeroSlide",
       "description": "Homepage dynamic promotional banners"
+    },
+    "/stockMovements/{movementId}": {
+      "schema": "StockMovement",
+      "description": "Inventory movements"
+    },
+    "/cashTransactions/{transactionId}": {
+      "schema": "CashTransaction",
+      "description": "Cash transactions"
     }
   }
 }
