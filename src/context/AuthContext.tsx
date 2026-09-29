@@ -44,8 +44,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PRIMARY_ADMIN_EMAIL = 'bajajmotors.chu@gmail.com';
-
 // Clean up any legacy or rogue cached admin flags
 if (typeof window !== 'undefined') {
   try {
@@ -94,26 +92,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('  Firestore Doc Exists:', userSnap.exists());
 
           if (!userSnap.exists()) {
-            // Profile document does not exist yet.
-            // If primary store admin email logs in, provision their admin profile document.
-            // Otherwise, default role is strictly 'customer'.
-            const isStoreAdminEmail = currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
-            const initialRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
-
+            // Document does not exist yet.
+            // Create user document with role strictly 'customer'. Never automatically set 'admin'.
             const newDocData = {
               uid: currentFbUser.uid,
-              name: currentFbUser.displayName || (isStoreAdminEmail ? 'Store Administrator' : 'Customer'),
+              name: currentFbUser.displayName || '',
               email: currentFbUser.email || '',
               phone: currentFbUser.phoneNumber || '',
-              role: initialRole,
+              role: 'customer',
               createdAt: serverTimestamp(),
             };
 
             try {
               await setDoc(userDocRef, newDocData);
-              console.log(`✅ Successfully initialized Firestore users/{uid} with role [${initialRole}]:`, currentFbUser.uid);
-            } catch (createErr) {
-              console.error('❌ Failed to create user document in Firestore:', createErr);
+              console.log(`✅ Successfully initialized Firestore users/{uid} with role [customer]:`, currentFbUser.uid);
+            } catch (createErr: any) {
+              const errCode = createErr?.code || 'unknown';
+              console.error(`❌ Failed to create user document in Firestore [${errCode}]:`, createErr?.message || createErr);
             }
 
             userSnap = await getDoc(userDocRef);
@@ -121,19 +116,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (userSnap.exists()) {
             const data = userSnap.data();
-            // Source of Truth: data.role === 'admin' strictly from Firestore
-            let firestoreRole: 'customer' | 'admin' = data.role === 'admin' ? 'admin' : 'customer';
-
-            // If the designated store owner email has a document without role: 'admin', sync it
-            if (currentFbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL && data.role !== 'admin') {
-              try {
-                await updateDoc(userDocRef, { role: 'admin', updatedAt: serverTimestamp() });
-                firestoreRole = 'admin';
-                console.log('✅ Synchronized admin role to Firestore for primary store owner');
-              } catch (upErr) {
-                console.warn('Syncing admin role to Firestore notice:', upErr);
-              }
-            }
+            // Source of Truth: data.role === 'admin' strictly from Firestore users/{uid}
+            const firestoreRole: 'customer' | 'admin' = data.role === 'admin' ? 'admin' : 'customer';
 
             console.log('  Verified Firestore Role:', firestoreRole);
 
@@ -185,7 +169,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             storageService.saveUser(fallbackUser);
           }
         } catch (error: any) {
-          console.warn('User profile sync notice:', error?.code || error?.message);
+          const errCode = error?.code || 'unknown';
+          console.error(`❌ User profile sync error in Firestore [${errCode}]:`, error?.message || error);
           const fallbackUser: User = {
             id: currentFbUser.uid,
             name: currentFbUser.displayName || 'Customer',
@@ -261,9 +246,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn('Phone lookup notice during login:', phoneErr);
           resolvedEmail = `${cleanPhone}@customer.minarulfashion.com`;
         }
-      } else if (['admin', 'administrator', 'bajajmotors', 'bajajmotors.chu', 'owner', 'superadmin'].includes(resolvedEmail)) {
-        // Automatically map administrator username shorthand to primary store administrator
-        resolvedEmail = PRIMARY_ADMIN_EMAIL;
       } else {
         throw new Error('সঠিক ইমেইল অথবা ১১ সংখ্যার বাংলাদেশি মোবাইল নম্বর লিখুন (যেমন: 017XXXXXXXX বা 018XXXXXXXX)।');
       }
@@ -300,8 +282,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         storageService.saveUser(loggedUser);
         return resolvedRole;
       }
-    } catch (e) {
-      console.warn('Firestore read notice during email login:', e);
+    } catch (e: any) {
+      const errCode = e?.code || 'unknown';
+      console.error(`❌ Firestore read error during email login [${errCode}]:`, e?.message || e);
     }
 
     // Fallback if Firestore read takes longer or document hasn't been populated
@@ -332,8 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const validEmail = email.trim() ? email.trim().toLowerCase() : `${cleanPhone}@customer.minarulfashion.com`;
     const trimmedName = name.trim();
-    const isStoreAdminEmail = validEmail === PRIMARY_ADMIN_EMAIL;
-    const assignedRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
+    const assignedRole: 'customer' = 'customer';
 
     // Check unique mobile number to prevent duplicate accounts
     try {
@@ -365,7 +347,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Could not update Firebase displayName:', e);
     }
 
-    // 3. User document structure strictly matching requested format
+    // 3. User document structure strictly matching requested format (default role: customer)
     const userDocData = {
       uid: fbUser.uid,
       name: trimmedName,
@@ -375,7 +357,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: serverTimestamp(),
     };
 
-    // 4. Create users/{uid} document in Firestore (resilient with 5s timeout)
+    // 4. Create users/{uid} document in Firestore
     const userDocRef = doc(db, 'users', fbUser.uid);
     try {
       await withTimeout(
@@ -383,11 +365,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         5000,
         'Firestore ডাটাবেজে ইউজার ডকুমেন্ট সংরক্ষণে অতিরিক্ত সময় লেগেছে।'
       );
-      console.log(`✅ Firestore users/{uid} document created successfully with role [${assignedRole}]:`, fbUser.uid);
-    } catch (firestoreErr: unknown) {
-      const errMessage = firestoreErr instanceof Error ? firestoreErr.message : String(firestoreErr);
-      const errCode = (firestoreErr as { code?: string })?.code || 'offline';
-      console.warn(`Firestore user document sync deferred on registration [${errCode}]:`, errMessage);
+      console.log(`✅ Firestore users/{uid} document created successfully with role [customer]:`, fbUser.uid);
+    } catch (firestoreErr: any) {
+      const errCode = firestoreErr?.code || 'unknown';
+      console.error(`❌ Failed to create user document in Firestore on registration [${errCode}]:`, firestoreErr?.message || firestoreErr);
+      throw new Error(`Firestore-এ অ্যাকাউন্ট তৈরি ব্যর্থ হয়েছে [${errCode}]: ${firestoreErr?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন।'}`);
     }
 
     // 5. Index phone in phoneLookup collection for mobile login
@@ -436,16 +418,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
 
       if (!snap.exists()) {
-        // Automatically create profile document in Firestore
-        // If primary store owner, create admin profile; otherwise, customer
-        const isStoreAdminEmail = fbUser.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL;
-        const initialRole: 'admin' | 'customer' = isStoreAdminEmail ? 'admin' : 'customer';
+        // Document does not exist: create strictly with role="customer"
+        // NEVER assign role="admin" from frontend automatically
         const newCustomerDoc = {
           uid: fbUser.uid,
-          name: fbUser.displayName || (isStoreAdminEmail ? 'Store Administrator' : 'Customer'),
+          name: fbUser.displayName || '',
           email: fbUser.email || '',
           phone: fbUser.phoneNumber || '',
-          role: initialRole,
+          role: 'customer',
           createdAt: serverTimestamp(),
         };
 
@@ -455,9 +435,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             5000,
             'Firestore-এ নতুন ইউজার ডকুমেন্ট সংরক্ষণে অতিরিক্ত সময় লেগেছে।'
           );
-          console.log(`✅ Created Google profile in Firestore users/{uid} [${initialRole}]:`, fbUser.uid);
-        } catch (setDocErr) {
-          console.warn('Firestore user document setDoc notice on Google Sign-In:', setDocErr);
+          console.log(`✅ Created Google profile in Firestore users/{uid} [customer]:`, fbUser.uid);
+        } catch (setDocErr: any) {
+          const errCode = setDocErr?.code || 'unknown';
+          console.error(`❌ Firestore user document creation error [${errCode}]:`, setDocErr?.message || setDocErr);
+          throw new Error(`Firestore-এ অ্যাকাউন্ট তৈরি ব্যর্থ হয়েছে [${errCode}]: ${setDocErr?.message || 'অনুগ্রহ করে পুনরায় চেষ্টা করুন।'}`);
         }
 
         snap = await getDoc(userDocRef);
@@ -465,6 +447,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (snap.exists()) {
         const data = snap.data();
+        // Role is strictly read from Firestore document!
         const resolvedRole: 'admin' | 'customer' = data.role === 'admin' ? 'admin' : 'customer';
 
         const existingUser: User = {
@@ -479,8 +462,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         storageService.saveUser(existingUser);
         return resolvedRole;
       }
-    } catch (e) {
-      console.warn('Firestore read/check notice on Google Sign-In:', e);
+    } catch (e: any) {
+      const errCode = e?.code || 'unknown';
+      console.error(`❌ Firestore error during Google Sign-In [${errCode}]:`, e?.message || e);
+      throw e;
     }
 
     // Role is strictly customer if Firestore verification fails

@@ -136,8 +136,8 @@ export function formatAuthError(err: unknown, language: 'bn' | 'en' = 'bn'): str
   // 4. Firestore / Permission Errors
   if (errorStr.includes('permission-denied') || errorStr.includes('Missing or insufficient permissions')) {
     return language === 'bn'
-      ? 'অনুমতি পাওয়া যায়নি (Permission denied)। অনুগ্রহ করে সঠিক অ্যাকাউন্টে লগইন করুন।'
-      : 'Missing or insufficient permissions.';
+      ? 'অনুমতি পাওয়া যায়নি [Firebase Error: permission-denied]। Firestore-এ এই কাজটি করার পর্যাপ্ত অনুমতি নেই।'
+      : 'Access denied [Firebase Error: permission-denied]. Missing or insufficient permissions.';
   }
 
   // Fallback to error message

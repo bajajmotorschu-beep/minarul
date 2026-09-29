@@ -142,7 +142,7 @@ export const AdminLoginScreen: React.FC<{
   const { loginWithEmail, registerWithEmail, loginWithGoogle } = useAuth();
 
   const [adminMode, setAdminMode] = useState<'login' | 'setup'>('login');
-  const [adminEmail, setAdminEmail] = useState('bajajmotors.chu@gmail.com');
+  const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminAuthLoading, setAdminAuthLoading] = useState(false);
   const [adminAuthError, setAdminAuthError] = useState('');
@@ -164,7 +164,11 @@ export const AdminLoginScreen: React.FC<{
     setIsGoogleDomainError(false);
     try {
       setAdminAuthLoading(true);
-      const targetEmail = adminEmail.trim() || 'bajajmotors.chu@gmail.com';
+      const targetEmail = adminEmail.trim();
+      if (!targetEmail) {
+        setAdminAuthError(language === 'bn' ? 'অনুগ্রহ করে ইমেইল লিখুন' : 'Please enter email');
+        return;
+      }
       if (adminMode === 'setup') {
         if (adminPassword.length < 6) {
           setAdminAuthError(language === 'bn' ? 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে' : 'Password must be at least 6 characters');
@@ -312,7 +316,7 @@ export const AdminLoginScreen: React.FC<{
               required
               value={adminEmail}
               onChange={(e) => setAdminEmail(e.target.value)}
-              placeholder="bajajmotors.chu@gmail.com"
+              placeholder="admin@minarulfashion.com"
               className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-amber-600 outline-none"
             />
           </div>

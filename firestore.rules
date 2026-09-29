@@ -30,14 +30,11 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
 
-      // Creation: customer can create their own profile with role == 'customer'
-      // The store owner (bajajmotors.chu@gmail.com) can initialize their admin profile document
-      // Existing admin can create any user profile
+      // Creation: Any authenticated user can create their own profile document,
+      // but role MUST be strictly 'customer'. Frontend cannot self-assign 'admin'.
+      // Existing admin can create user profiles.
       allow create: if isSignedIn() && (
-        (isOwner(userId) && (
-          request.resource.data.role == 'customer' ||
-          (request.auth.token.email == "bajajmotors.chu@gmail.com" && request.resource.data.role == 'admin')
-        )) ||
+        (isOwner(userId) && request.resource.data.role == 'customer') ||
         isAdmin()
       );
 
