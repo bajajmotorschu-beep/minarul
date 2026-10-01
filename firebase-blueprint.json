@@ -334,6 +334,18 @@
       "schema": "SupplierPayment",
       "description": "Supplier payment receipts"
     },
+    "/transactions/{transactionId}": {
+      "schema": "CashTransaction",
+      "description": "Ledger and journal transactions"
+    },
+    "/returns/{returnId}": {
+      "schema": "object",
+      "description": "Product sales and purchase returns"
+    },
+    "/payments/{paymentId}": {
+      "schema": "object",
+      "description": "Customer payments and refunds"
+    },
     "/accounts/{accountId}": {
       "schema": "object",
       "description": "Financial opening balances and account setups"

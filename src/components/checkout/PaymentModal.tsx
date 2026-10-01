@@ -53,28 +53,28 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const methodDetails = {
     bkash: {
-      name: 'bKash (বিকাশ)',
+      name: language === 'bn' ? 'বিকাশ Send Money' : 'bKash Send Money',
       color: 'bg-pink-600',
       textColor: 'text-pink-600',
       borderColor: 'border-pink-500',
       code: '*247#',
-      type: 'bKash Merchant / Personal Send Money',
+      type: language === 'bn' ? 'বিকাশ Send Money' : 'bKash Send Money',
     },
     nagad: {
-      name: 'Nagad (নগদ)',
+      name: language === 'bn' ? 'নগদ Send Money' : 'Nagad Send Money',
       color: 'bg-orange-600',
       textColor: 'text-orange-600',
       borderColor: 'border-orange-500',
       code: '*167#',
-      type: 'Nagad Send Money / Payment',
+      type: language === 'bn' ? 'নগদ Send Money' : 'Nagad Send Money',
     },
     rocket: {
-      name: 'Rocket (রকেট)',
+      name: language === 'bn' ? 'রকেট Send Money' : 'Rocket Send Money',
       color: 'bg-purple-700',
       textColor: 'text-purple-700',
       borderColor: 'border-purple-500',
       code: '*322#',
-      type: 'Rocket DBBL Mobile Banking',
+      type: language === 'bn' ? 'রকেট Send Money' : 'Rocket Send Money',
     },
     cod: {
       name: 'Cash on Delivery',
@@ -164,8 +164,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700">
               {language === 'bn'
-                ? (method === 'bkash' ? 'মিনারুল ফ্যাশন বিকাশ Send Money নম্বর:' : 'মিনারুল ফ্যাশন অ্যাকাউন্ট নম্বর:')
-                : (method === 'bkash' ? 'bKash Send Money Number:' : 'Account Number:')}
+                ? (method === 'bkash'
+                    ? 'মিনারুল ফ্যাশন বিকাশ Send Money নম্বর:'
+                    : method === 'nagad'
+                    ? 'মিনারুল ফ্যাশন নগদ Send Money নম্বর:'
+                    : 'মিনারুল ফ্যাশন রকেট Send Money নম্বর:')
+                : (method === 'bkash'
+                    ? 'bKash Send Money Number:'
+                    : method === 'nagad'
+                    ? 'Nagad Send Money Number:'
+                    : 'Rocket Send Money Number:')}
             </label>
             <div className="flex items-center justify-between p-3 rounded-xl border border-stone-300 bg-stone-50">
               <span className="font-mono text-base font-extrabold text-stone-900 tracking-wider">
@@ -198,8 +206,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 {language === 'bn'
                   ? (method === 'bkash'
                       ? `বিকাশ Send Money অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`
-                      : `Send Money / Payment অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`)
-                  : `Send ${formatPrice(amount)} to the number above`}
+                      : method === 'nagad'
+                      ? `নগদ Send Money অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`
+                      : `রকেট Send Money অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`)
+                  : `Send ${formatPrice(amount)} to the ${methodDetails.name} number above`}
               </li>
               <li>
                 {language === 'bn'

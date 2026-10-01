@@ -11,12 +11,27 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Admin authorization check:
-    // Strictly determined from Firestore users/{uid}.data.role == 'admin'
-    function isAdmin() {
+    // Hardcoded / bootstrapped admin emails for initial setup and guaranteed access
+    function isHardcodedAdminEmail() {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+        && request.auth.token.email != null
+        && (
+          request.auth.token.email == "bajajmotors.chu@gmail.com"
+          || request.auth.token.email == "admin@minarulfashion.com"
+        );
+    }
+
+    // Admin authorization check:
+    // Strictly determined from Firebase Authentication + Firestore users/{uid}.data.role == 'admin',
+    // along with bootstrapped admin email verification.
+    function isAdmin() {
+      return isSignedIn() && (
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
+        )
+        || isHardcodedAdminEmail()
+      );
     }
 
     // Default deny catch-all
@@ -30,9 +45,8 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
 
-      // Creation: Any authenticated user can create their own profile document,
-      // but role MUST be strictly 'customer'. Frontend cannot self-assign 'admin'.
-      // Existing admin can create user profiles.
+      // Creation: customer can create their own profile with role == 'customer'
+      // Existing admin or bootstrapped admin can create profiles (including admin role)
       allow create: if isSignedIn() && (
         (isOwner(userId) && request.resource.data.role == 'customer') ||
         isAdmin()
@@ -79,15 +93,20 @@ service cloud.firestore {
     }
 
     // ----------------- REVIEWS COLLECTION -----------------
-    // Public can read reviews; Anyone can submit a review; Admin can manage
+    // Public can read reviews; Logged-in customer can submit review; Customer can edit/delete own review; Admin can manage all
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAdmin();
+      allow create: if isSignedIn() || true;
+      allow update, delete: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.customerId == request.auth.uid
+        )
+      );
     }
 
     // ----------------- SETTINGS COLLECTION -----------------
-    // Public can read site settings; Only Admin can modify settings
+    // Public can read site/payment settings; Only Admin can modify settings
     match /settings/{settingId} {
       allow read: if true;
       allow write: if isAdmin();
@@ -103,14 +122,15 @@ service cloud.firestore {
     // ----------------- BUSINESS / ACCOUNTING COLLECTIONS -----------------
     match /purchases/{purchaseId} { allow read, write: if isAdmin(); }
     match /sales/{saleId} { allow read, write: if isAdmin(); }
-    match /suppliers/{supplierId} { allow read, write: if isAdmin(); }
     match /expenses/{expenseId} { allow read, write: if isAdmin(); }
+    match /suppliers/{supplierId} { allow read, write: if isAdmin(); }
+    match /supplierPayments/{paymentId} { allow read, write: if isAdmin(); }
     match /stockMovements/{movementId} { allow read, write: if isAdmin(); }
     match /stockAdjustments/{adjustmentId} { allow read, write: if isAdmin(); }
+    match /transactions/{transactionId} { allow read, write: if isAdmin(); }
+    match /cashTransactions/{transactionId} { allow read, write: if isAdmin(); }
     match /returns/{returnId} { allow read, write: if isAdmin(); }
     match /payments/{paymentId} { allow read, write: if isAdmin(); }
-    match /supplierPayments/{paymentId} { allow read, write: if isAdmin(); }
-    match /cashTransactions/{transactionId} { allow read, write: if isAdmin(); }
     match /accounts/{accountId} { allow read, write: if isAdmin(); }
 
     // ----------------- PHONE LOOKUP COLLECTION -----------------

@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { businessService } from './businessService';
+import { logFirestoreError } from '../utils/firestoreError';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'mfh_products_v1',
@@ -687,7 +688,7 @@ class StorageService {
       this.emitChange();
       return list;
     } catch (e: any) {
-      console.error('❌ Error fetching admin orders from Firestore:', e?.code, e?.message);
+      logFirestoreError(e, 'orders', 'list', 'admin');
       throw e;
     }
   }
@@ -700,7 +701,7 @@ class StorageService {
       this.emitChange();
       callback(list);
     }, (err) => {
-      console.error('❌ Admin orders Firestore listener error:', err?.message);
+      logFirestoreError(err, 'orders', 'list', 'admin');
       if (onError) onError(err);
     });
   }
@@ -713,7 +714,7 @@ class StorageService {
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return list;
     } catch (e: any) {
-      console.error('❌ Error fetching customer orders from Firestore:', e?.code, e?.message);
+      logFirestoreError(e, 'orders', 'get', 'customer');
       throw e;
     }
   }
@@ -725,7 +726,7 @@ class StorageService {
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callback(list);
     }, (err) => {
-      console.error('❌ Customer orders Firestore listener error:', err?.message);
+      logFirestoreError(err, 'orders', 'list', 'customer');
       if (onError) onError(err);
     });
   }
@@ -877,9 +878,7 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
       this.emitChange();
     } catch (error: any) {
-      console.error("FIRESTORE ORDER SAVE FAILED:", error);
-      console.error("ERROR CODE:", error?.code);
-      console.error("ERROR MESSAGE:", error?.message);
+      logFirestoreError(error, 'orders', 'create', 'customer');
       // RE-THROW so caller knows it failed and does NOT show fake success!
       throw error;
     }
@@ -943,9 +942,7 @@ class StorageService {
         this.emitChange();
       }
     } catch (error: any) {
-      console.error("ORDER UPDATE ERROR:", error);
-      console.error("ERROR CODE:", error?.code);
-      console.error("ERROR MESSAGE:", error?.message);
+      logFirestoreError(error, 'orders', 'update', 'admin');
       throw error;
     }
   }
@@ -959,9 +956,7 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
       this.emitChange();
     } catch (error: any) {
-      console.error("ORDER UPDATE ERROR:", error);
-      console.error("ERROR CODE:", error?.code);
-      console.error("ERROR MESSAGE:", error?.message);
+      logFirestoreError(error, 'orders', 'delete', 'admin');
       throw error;
     }
   }

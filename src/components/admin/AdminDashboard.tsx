@@ -64,8 +64,10 @@ import {
   CashTransaction,
   OpeningBalances
 } from '../../types';
-import { app, db } from '../../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { app, db, auth } from '../../firebase';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { logFirestoreError } from '../../utils/firestoreError';
+import { isAdminEmail } from '../../context/AuthContext';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
 import { businessService } from '../../services/businessService';
 import { StockManagement } from './StockManagement';
@@ -187,9 +189,34 @@ export const AdminLoginScreen: React.FC<{
           return;
         }
         await registerWithEmail('Store Administrator', targetEmail, '01700000000', adminPassword);
+        if (auth.currentUser) {
+          try {
+            await setDoc(doc(db, 'users', auth.currentUser.uid), {
+              uid: auth.currentUser.uid,
+              name: 'Store Administrator',
+              email: targetEmail,
+              phone: '01700000000',
+              role: 'admin',
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+            console.log("✅ Admin role ensured in Firestore users/{uid}:", auth.currentUser.uid);
+          } catch (docErr) {
+            logFirestoreError(docErr, 'users', 'create', 'admin');
+          }
+        }
         onToast(language === 'bn' ? 'অ্যাডমিন অ্যাকাউন্ট সেটআপ সফল হয়েছে!' : 'Admin account setup successful!', 'success');
       } else {
         await loginWithEmail(targetEmail, adminPassword);
+        if (auth.currentUser) {
+          try {
+            await setDoc(doc(db, 'users', auth.currentUser.uid), {
+              role: 'admin',
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+          } catch (docErr) {
+            logFirestoreError(docErr, 'users', 'update', 'admin');
+          }
+        }
         onToast(language === 'bn' ? 'অ্যাডমিন লগইন সফল হয়েছে!' : 'Admin login successful', 'success');
       }
     } catch (err: unknown) {
@@ -375,7 +402,17 @@ export const AdminLoginScreen: React.FC<{
                 setAdminAuthLoading(true);
                 setIsGoogleDomainError(false);
                 setAdminAuthError('');
-                await loginWithGoogle();
+                const resolvedRole = await loginWithGoogle();
+                if (auth.currentUser && (resolvedRole === 'admin' || isAdminEmail(auth.currentUser.email))) {
+                  try {
+                    await setDoc(doc(db, 'users', auth.currentUser.uid), {
+                      role: 'admin',
+                      updatedAt: serverTimestamp(),
+                    }, { merge: true });
+                  } catch (docErr) {
+                    logFirestoreError(docErr, 'users', 'update', 'admin');
+                  }
+                }
               } catch (e: unknown) {
                 console.warn('Admin Google Sign-In notice:', (e as any)?.message || e);
                 if (isUnauthorizedDomainError(e)) {
@@ -503,6 +540,24 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
 
   // Directly load and subscribe to Firestore orders for admin (Source of Truth: Firestore)
   useEffect(() => {
+    // Ensure current logged-in admin user's Firestore document role is 'admin'
+    if (auth.currentUser) {
+      const uRef = doc(db, 'users', auth.currentUser.uid);
+      getDoc(uRef).then((uSnap) => {
+        if (!uSnap.exists() || uSnap.data()?.role !== 'admin') {
+          setDoc(uRef, {
+            uid: auth.currentUser!.uid,
+            name: auth.currentUser!.displayName || 'Store Administrator',
+            email: auth.currentUser!.email || 'admin@minarulfashion.com',
+            role: 'admin',
+            updatedAt: serverTimestamp(),
+          }, { merge: true })
+          .then(() => console.log('✅ Admin Firestore role confirmed: admin'))
+          .catch((err) => logFirestoreError(err, 'users', 'update', 'admin'));
+        }
+      }).catch((err) => logFirestoreError(err, 'users', 'read', 'admin'));
+    }
+
     setOrdersLoading(true);
     storageService.fetchAdminOrders()
       .then((list) => {
@@ -511,7 +566,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
         setOrdersError(null);
       })
       .catch((err) => {
-        console.warn('Admin initial orders fetch notice:', err);
+        logFirestoreError(err, 'orders', 'list', 'admin');
         setOrdersLoading(false);
       });
 
@@ -1733,11 +1788,11 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
                     <strong className="font-mono text-pink-700">{settings.bkashMerchantNumber}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span>Nagad Merchant:</span>
+                    <span>{language === 'bn' ? 'নগদ Send Money:' : 'Nagad Send Money:'}</span>
                     <strong className="font-mono text-orange-700">{settings.nagadMerchantNumber}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span>Rocket Account:</span>
+                    <span>{language === 'bn' ? 'রকেট Send Money:' : 'Rocket Send Money:'}</span>
                     <strong className="font-mono text-purple-700">{settings.rocketMerchantNumber}</strong>
                   </div>
                   <div className="flex justify-between pt-1 border-t border-stone-100">
@@ -2651,7 +2706,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
 
                   <div>
                     <label className="block font-bold text-orange-700 mb-1">
-                      Nagad (নগদ) Merchant Number *
+                      {language === 'bn' ? 'নগদ Send Money নম্বর *' : 'Nagad Send Money Number *'}
                     </label>
                     <input
                       type="text"
@@ -2666,7 +2721,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
 
                   <div>
                     <label className="block font-bold text-purple-700 mb-1">
-                      Rocket (রকেট) Account Number *
+                      {language === 'bn' ? 'রকেট Send Money নম্বর *' : 'Rocket Send Money Number *'}
                     </label>
                     <input
                       type="text"

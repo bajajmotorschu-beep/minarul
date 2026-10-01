@@ -27,6 +27,7 @@ import {
   PaymentAccountMethod,
   Order,
 } from '../types';
+import { logFirestoreError } from '../utils/firestoreError';
 
 const clean = <T extends Record<string, any>>(value: T): T =>
   JSON.parse(JSON.stringify(value, (_key, v) => (v === undefined ? null : v)));
@@ -46,50 +47,90 @@ export const businessService = {
   // 1. DATA FETCHERS
   // =========================================================================
   async getPurchases(): Promise<Purchase[]> {
-    const snap = await getDocs(query(collection(db, 'purchases'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Purchase[];
+    try {
+      const snap = await getDocs(query(collection(db, 'purchases'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Purchase[];
+    } catch (err) {
+      logFirestoreError(err, 'purchases', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getExpenses(): Promise<Expense[]> {
-    const snap = await getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Expense[];
+    try {
+      const snap = await getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Expense[];
+    } catch (err) {
+      logFirestoreError(err, 'expenses', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getSuppliers(): Promise<Supplier[]> {
-    const snap = await getDocs(query(collection(db, 'suppliers'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Supplier[];
+    try {
+      const snap = await getDocs(query(collection(db, 'suppliers'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Supplier[];
+    } catch (err) {
+      logFirestoreError(err, 'suppliers', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getSales(): Promise<Sale[]> {
-    const snap = await getDocs(query(collection(db, 'sales'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Sale[];
+    try {
+      const snap = await getDocs(query(collection(db, 'sales'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Sale[];
+    } catch (err) {
+      logFirestoreError(err, 'sales', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getStockMovements(): Promise<StockMovement[]> {
-    const snap = await getDocs(query(collection(db, 'stockMovements'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        ...data,
-        type: data.type || data.movementType || 'MANUAL_CORRECTION',
-      };
-    }) as StockMovement[];
+    try {
+      const snap = await getDocs(query(collection(db, 'stockMovements'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          type: data.type || data.movementType || 'MANUAL_CORRECTION',
+        };
+      }) as StockMovement[];
+    } catch (err) {
+      logFirestoreError(err, 'stockMovements', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getStockAdjustments(): Promise<StockAdjustment[]> {
-    const snap = await getDocs(query(collection(db, 'stockAdjustments'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as StockAdjustment[];
+    try {
+      const snap = await getDocs(query(collection(db, 'stockAdjustments'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as StockAdjustment[];
+    } catch (err) {
+      logFirestoreError(err, 'stockAdjustments', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getCashTransactions(): Promise<CashTransaction[]> {
-    const snap = await getDocs(query(collection(db, 'cashTransactions'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as CashTransaction[];
+    try {
+      const snap = await getDocs(query(collection(db, 'cashTransactions'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as CashTransaction[];
+    } catch (err) {
+      logFirestoreError(err, 'cashTransactions', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getSupplierPayments(): Promise<SupplierPayment[]> {
-    const snap = await getDocs(query(collection(db, 'supplierPayments'), orderBy('createdAt', 'desc')));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as SupplierPayment[];
+    try {
+      const snap = await getDocs(query(collection(db, 'supplierPayments'), orderBy('createdAt', 'desc')));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as SupplierPayment[];
+    } catch (err) {
+      logFirestoreError(err, 'supplierPayments', 'list', 'admin');
+      throw err;
+    }
   },
 
   async getOpeningBalances(): Promise<OpeningBalances> {
