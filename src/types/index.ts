@@ -203,6 +203,7 @@ export interface Sale {
   paymentMethod: string;
   paymentStatus: string;
   saleStatus: string;
+  notes?: string;
   saleDate?: any;
   createdAt?: any;
   updatedAt?: any;

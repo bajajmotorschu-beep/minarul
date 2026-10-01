@@ -163,7 +163,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {/* Number & Copy */}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700">
-              {language === 'bn' ? 'মিনারুল ফ্যাশন মার্চেন্ট অ্যাকাউন্ট নম্বর:' : 'Merchant Account Number:'}
+              {language === 'bn'
+                ? (method === 'bkash' ? 'মিনারুল ফ্যাশন বিকাশ Send Money নম্বর:' : 'মিনারুল ফ্যাশন অ্যাকাউন্ট নম্বর:')
+                : (method === 'bkash' ? 'bKash Send Money Number:' : 'Account Number:')}
             </label>
             <div className="flex items-center justify-between p-3 rounded-xl border border-stone-300 bg-stone-50">
               <span className="font-mono text-base font-extrabold text-stone-900 tracking-wider">
@@ -194,8 +196,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </li>
               <li>
                 {language === 'bn'
-                  ? `Send Money / Payment অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`
-                  : `Send ${formatPrice(amount)} to the merchant number above`}
+                  ? (method === 'bkash'
+                      ? `বিকাশ Send Money অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`
+                      : `Send Money / Payment অপশনে গিয়ে উপরে দেওয়া নম্বরে ৳${amount} টাকা পাঠান`)
+                  : `Send ${formatPrice(amount)} to the number above`}
               </li>
               <li>
                 {language === 'bn'

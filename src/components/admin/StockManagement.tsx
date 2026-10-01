@@ -19,6 +19,8 @@ import {
   Package,
   Layers,
   Sparkles,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { Product, StockMovement, StockAdjustment, StockMovementType, Order } from '../../types';
 import { businessService } from '../../services/businessService';
@@ -41,7 +43,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   onRefreshProducts,
 }) => {
   const { language } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'overview' | 'movements' | 'valuation'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'movements' | 'valuation' | 'adjustments'>('overview');
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -64,6 +66,16 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   const [adjNote, setAdjNote] = useState<string>('');
   const [adjConfirmed, setAdjConfirmed] = useState(false);
   const [adjSaving, setAdjSaving] = useState(false);
+
+  // Edit / Delete Adjustment States
+  const [editingAdj, setEditingAdj] = useState<StockAdjustment | null>(null);
+  const [editAdjQuantity, setEditAdjQuantity] = useState<number>(1);
+  const [editAdjReason, setEditAdjReason] = useState<string>('');
+  const [editAdjNote, setEditAdjNote] = useState<string>('');
+  const [editAdjSaving, setEditAdjSaving] = useState(false);
+
+  const [deletingAdj, setDeletingAdj] = useState<StockAdjustment | null>(null);
+  const [deletingAdjLoading, setDeletingAdjLoading] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -263,6 +275,87 @@ export const StockManagement: React.FC<StockManagementProps> = ({
     } finally {
       setAdjSaving(false);
     }
+  };
+
+  // Open Edit Adjustment Modal
+  const openEditAdjModal = (adj: StockAdjustment) => {
+    setEditingAdj(adj);
+    setEditAdjQuantity(adj.quantity || 1);
+    setEditAdjReason(adj.reason || '');
+    setEditAdjNote(adj.note || '');
+  };
+
+  // Handle Update Adjustment
+  const handleUpdateAdj = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAdj) return;
+    setEditAdjSaving(true);
+    try {
+      await businessService.updateStockAdjustment(editingAdj.id || editingAdj.adjustmentId, {
+        quantity: Math.abs(Number(editAdjQuantity) || 1),
+        reason: editAdjReason.trim(),
+        note: editAdjNote.trim(),
+      });
+      onToast(language === 'bn' ? 'স্টক অ্যাডজাস্টমেন্ট সফলভাবে আপডেট হয়েছে!' : 'Stock adjustment updated successfully!', 'success');
+      setEditingAdj(null);
+      await loadData();
+      if (onRefreshProducts) onRefreshProducts();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to update adjustment', 'error');
+    } finally {
+      setEditAdjSaving(false);
+    }
+  };
+
+  // Handle Delete Adjustment
+  const handleDeleteAdj = async () => {
+    if (!deletingAdj) return;
+    setDeletingAdjLoading(true);
+    try {
+      await businessService.deleteStockAdjustment(deletingAdj.id || deletingAdj.adjustmentId);
+      onToast(language === 'bn' ? 'স্টক অ্যাডজাস্টমেন্ট মুছে ফেলা হয়েছে এবং ইনভেন্টরি রিস্টোর হয়েছে!' : 'Stock adjustment deleted and inventory reverted!', 'success');
+      setDeletingAdj(null);
+      await loadData();
+      if (onRefreshProducts) onRefreshProducts();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to delete adjustment', 'error');
+    } finally {
+      setDeletingAdjLoading(false);
+    }
+  };
+
+  // Handle Export Adjustments CSV
+  const handleExportAdjustmentsCSV = () => {
+    const headers = [
+      'Adjustment ID',
+      'Date',
+      'Product Name',
+      'SKU',
+      'Adjustment Type',
+      'Quantity',
+      'Reason',
+      'Note',
+    ];
+    const rows = adjustments.map((a) => {
+      const dStr = a.createdAt?.toDate
+        ? a.createdAt.toDate().toLocaleString('en-BD')
+        : typeof a.createdAt === 'string'
+        ? a.createdAt
+        : '-';
+      return [
+        a.adjustmentId,
+        dStr,
+        a.productName,
+        a.sku || '-',
+        a.adjustmentType,
+        a.quantity,
+        a.reason || '-',
+        a.note || '-',
+      ];
+    });
+    exportToCSV('minarul_stock_adjustments', rows, headers);
   };
 
   // CSV Export
@@ -507,11 +600,29 @@ export const StockManagement: React.FC<StockManagementProps> = ({
             <Layers className="inline w-3.5 h-3.5 mr-1" />
             {language === 'bn' ? 'ইনভেন্টরি ভ্যালুয়েশন' : 'Inventory Valuation'}
           </button>
+
+          <button
+            onClick={() => setActiveTab('adjustments')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'adjustments'
+                ? 'bg-amber-700 text-white shadow-xs'
+                : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'
+            }`}
+          >
+            <Sliders className="inline w-3.5 h-3.5 mr-1" />
+            {language === 'bn' ? 'স্টক অ্যাডজাস্টমেন্ট রেকর্ড' : 'Stock Adjustments'} ({adjustments.length})
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={activeTab === 'movements' ? handleExportMovementsCSV : handleExportStockCSV}
+            onClick={
+              activeTab === 'movements'
+                ? handleExportMovementsCSV
+                : activeTab === 'adjustments'
+                ? handleExportAdjustmentsCSV
+                : handleExportStockCSV
+            }
             className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold flex items-center gap-1 shadow-2xs cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
@@ -863,6 +974,97 @@ export const StockManagement: React.FC<StockManagementProps> = ({
       )}
 
       {/* ------------------------------------------------------------- */}
+      {/* TAB 4: STOCK ADJUSTMENTS TABLE */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'adjustments' && (
+        <div id="stock-adjustments-area" className="bg-white rounded-3xl border border-stone-200 overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-bold uppercase text-[10px] tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Adj ID</th>
+                  <th className="py-3 px-3">Date</th>
+                  <th className="py-3 px-3">Product Name</th>
+                  <th className="py-3 px-3 text-center">Type</th>
+                  <th className="py-3 px-3 text-center">Qty Adjusted</th>
+                  <th className="py-3 px-3">Reason & Notes</th>
+                  <th className="py-3 px-4 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {adjustments.map((adj) => {
+                  const dStr = adj.createdAt?.toDate
+                    ? adj.createdAt.toDate().toLocaleString('en-BD')
+                    : typeof adj.createdAt === 'string'
+                    ? adj.createdAt
+                    : '-';
+                  const isAdd = adj.adjustmentType === 'ADJUSTMENT_IN' || adj.adjustmentType === 'MANUAL_CORRECTION';
+                  return (
+                    <tr key={adj.id || adj.adjustmentId} className="hover:bg-stone-50/70 transition-colors">
+                      <td className="py-3 px-4 font-mono font-bold text-stone-900 text-[11px]">
+                        {adj.adjustmentId || adj.id}
+                      </td>
+                      <td className="py-3 px-3 text-stone-500 whitespace-nowrap text-[11px]">
+                        {dStr}
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-stone-900">
+                        {adj.productName}
+                        {adj.sku && <div className="text-[10px] text-stone-400 font-mono">SKU: {adj.sku}</div>}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isAdd
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {adj.adjustmentType}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-bold text-sm">
+                        <span className={isAdd ? 'text-emerald-700' : 'text-rose-700'}>
+                          {isAdd ? `+${adj.quantity}` : `-${adj.quantity}`} pcs
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-stone-700 text-[11px]">
+                        <div className="font-medium text-stone-900">{adj.reason || '-'}</div>
+                        {adj.note && <div className="text-[10px] text-stone-500 italic">{adj.note}</div>}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => openEditAdjModal(adj)}
+                            className="p-1.5 rounded-lg border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'অ্যাডজাস্টমেন্ট সম্পাদনা' : 'Edit Adjustment'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingAdj(adj)}
+                            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'অ্যাডজাস্টমেন্ট মুছে ফেলুন' : 'Delete Adjustment'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {!adjustments.length && (
+              <div className="p-8 text-center text-stone-400 text-xs">
+                No stock adjustments recorded yet.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
       {/* STOCK ADJUSTMENT MODAL */}
       {/* ------------------------------------------------------------- */}
       {showAdjModal && (
@@ -1052,6 +1254,160 @@ export const StockManagement: React.FC<StockManagementProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* EDIT STOCK ADJUSTMENT MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {editingAdj && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200 text-xs">
+            <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-blue-700" />
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'স্টক অ্যাডজাস্টমেন্ট সম্পাদনা' : 'Edit Stock Adjustment'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingAdj(null)}
+                className="p-1.5 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Product:</span>
+                <span className="font-bold text-stone-900">{editingAdj.productName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Adjustment Type:</span>
+                <span className="font-bold font-mono text-amber-800">{editingAdj.adjustmentType}</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdateAdj} className="space-y-3.5">
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'পরিমাণ (Quantity) *' : 'Quantity *'}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={editAdjQuantity}
+                  onChange={(e) => setEditAdjQuantity(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 focus:border-blue-600 outline-none font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'কারণ (Reason) *' : 'Reason *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editAdjReason}
+                  onChange={(e) => setEditAdjReason(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 focus:border-blue-600 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'নোট (Note)' : 'Note'}
+                </label>
+                <textarea
+                  rows={2}
+                  value={editAdjNote}
+                  onChange={(e) => setEditAdjNote(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 focus:border-blue-600 outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingAdj(null)}
+                  className="px-4 py-2.5 rounded-xl border border-stone-300 hover:bg-stone-50 text-stone-700 font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editAdjSaving}
+                  className="px-5 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold disabled:opacity-50 cursor-pointer shadow-md"
+                >
+                  {editAdjSaving ? 'Saving...' : 'Update Adjustment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* DELETE STOCK ADJUSTMENT MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {deletingAdj && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200 text-xs">
+            <div className="flex items-center gap-3 text-rose-700">
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'অ্যাডজাস্টমেন্ট মুছে ফেলতে চান?' : 'Delete Stock Adjustment?'}
+                </h3>
+                <p className="text-xs text-stone-500">ID: {deletingAdj.adjustmentId || deletingAdj.id}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-2 text-stone-700">
+              <p>
+                {language === 'bn'
+                  ? 'এই অ্যাডজাস্টমেন্ট রেকর্ডটি মুছে ফেললে পণ্যের মূল স্টক সংখ্যায় এটি স্বয়ংক্রিয়ভাবে রিস্টোর (Revert) হবে।'
+                  : 'Deleting this adjustment will automatically revert the physical product stock to its pre-adjustment quantity.'}
+              </p>
+              <div className="border-t border-rose-200/60 pt-2 flex justify-between font-bold">
+                <span>Product:</span>
+                <span>{deletingAdj.productName}</span>
+              </div>
+              <div className="flex justify-between text-stone-600">
+                <span>Quantity:</span>
+                <span className="font-mono font-bold text-rose-800">{deletingAdj.quantity} pcs</span>
+              </div>
+              <div className="flex justify-between text-stone-600">
+                <span>Type:</span>
+                <span className="font-mono">{deletingAdj.adjustmentType}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deletingAdjLoading}
+                onClick={() => setDeletingAdj(null)}
+                className="px-4 py-2.5 rounded-xl border border-stone-300 hover:bg-stone-50 text-stone-700 font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingAdjLoading}
+                onClick={handleDeleteAdj}
+                className="px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-bold flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {deletingAdjLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{language === 'bn' ? 'হ্যাঁ, মুছে ফেলুন' : 'Confirm Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

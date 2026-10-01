@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   X,
   Eye,
+  Pencil,
+  AlertTriangle,
   Calendar,
   Layers,
   Building,
@@ -59,6 +61,27 @@ export const PurchasesManagement: React.FC<PurchasesManagementProps> = ({
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedQty, setSelectedQty] = useState<number>(1);
   const [selectedCost, setSelectedCost] = useState<number>(0);
+
+  // Edit & Delete & Print States
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+  const [editSupplierId, setEditSupplierId] = useState('');
+  const [editPurchaseDate, setEditPurchaseDate] = useState('');
+  const [editItems, setEditItems] = useState<PurchaseItem[]>([]);
+  const [editDiscount, setEditDiscount] = useState<number>(0);
+  const [editTransportCost, setEditTransportCost] = useState<number>(0);
+  const [editPaidAmount, setEditPaidAmount] = useState<number>(0);
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentAccountMethod>('CASH');
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Edit Line Item Entry
+  const [editSelectedProductId, setEditSelectedProductId] = useState('');
+  const [editSelectedQty, setEditSelectedQty] = useState<number>(1);
+  const [editSelectedCost, setEditSelectedCost] = useState<number>(0);
+
+  const [deletingPurchase, setDeletingPurchase] = useState<Purchase | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [printPurchase, setPrintPurchase] = useState<Purchase | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -170,6 +193,116 @@ export const PurchasesManagement: React.FC<PurchasesManagementProps> = ({
       onToast(err?.message || 'Purchase save failed', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Open Edit Modal
+  const openEditModal = (p: Purchase) => {
+    setEditingPurchase(p);
+    setEditSupplierId(p.supplierId || '');
+    setEditPurchaseDate(p.purchaseDate || new Date().toISOString().slice(0, 10));
+    setEditItems(p.items ? JSON.parse(JSON.stringify(p.items)) : []);
+    setEditDiscount(Number(p.discount) || 0);
+    setEditTransportCost(Number(p.transportCost) || 0);
+    setEditPaidAmount(Number(p.paidAmount) || 0);
+    const m = (p.paymentMethod || 'CASH').toUpperCase();
+    setEditPaymentMethod(['CASH', 'BKASH', 'NAGAD', 'ROCKET', 'BANK'].includes(m) ? (m as PaymentAccountMethod) : 'CASH');
+    setEditNotes(p.notes || '');
+  };
+
+  // Add Item in Edit Modal
+  const handleAddEditItem = () => {
+    const prod = products.find((p) => p.id === editSelectedProductId);
+    if (!prod) {
+      onToast('Select a product to add', 'error');
+      return;
+    }
+    if (editSelectedQty <= 0 || editSelectedCost <= 0) {
+      onToast('Quantity and Unit Cost must be greater than zero', 'error');
+      return;
+    }
+    const newItem: PurchaseItem = {
+      productId: prod.id,
+      productName: prod.titleEn || prod.titleBn,
+      sku: prod.sku,
+      quantity: Number(editSelectedQty),
+      unitCost: Number(editSelectedCost),
+      totalCost: Number(editSelectedQty) * Number(editSelectedCost),
+    };
+    setEditItems([...editItems, newItem]);
+    setEditSelectedProductId('');
+    setEditSelectedQty(1);
+    setEditSelectedCost(0);
+  };
+
+  const handleRemoveEditItem = (index: number) => {
+    setEditItems(editItems.filter((_, i) => i !== index));
+  };
+
+  // Edit Calculations
+  const editSubtotal = editItems.reduce((sum, it) => sum + it.totalCost, 0);
+  const editGrandTotal = Math.max(0, editSubtotal + Number(editTransportCost || 0) - Number(editDiscount || 0));
+  const editDueAmount = Math.max(0, editGrandTotal - Number(editPaidAmount || 0));
+
+  // Submit Update
+  const handleUpdatePurchase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPurchase) return;
+    if (!editItems.length) {
+      onToast('Invoice must contain at least one item', 'error');
+      return;
+    }
+    const sup = suppliers.find((s) => s.id === editSupplierId);
+    setEditSaving(true);
+    try {
+      const pId = editingPurchase.id || editingPurchase.purchaseId || '';
+      await businessService.updatePurchase(pId, {
+        supplierId: editSupplierId,
+        supplierName: sup ? sup.name : editingPurchase.supplierName,
+        purchaseDate: editPurchaseDate,
+        items: editItems,
+        subtotal: editSubtotal,
+        discount: Number(editDiscount) || 0,
+        transportCost: Number(editTransportCost) || 0,
+        grandTotal: editGrandTotal,
+        paidAmount: Number(editPaidAmount) || 0,
+        dueAmount: editDueAmount,
+        paymentMethod: editPaymentMethod,
+        notes: editNotes.trim(),
+      });
+      onToast(language === 'bn' ? 'চালান সফলভাবে আপডেট করা হয়েছে!' : 'Purchase invoice updated successfully!', 'success');
+      setEditingPurchase(null);
+      await loadData();
+      if (onRefreshProducts) onRefreshProducts();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to update purchase', 'error');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // Confirm Delete Purchase
+  const handleDeletePurchase = async () => {
+    if (!deletingPurchase) return;
+    setDeleting(true);
+    try {
+      const pId = deletingPurchase.id || deletingPurchase.purchaseId || '';
+      await businessService.deletePurchase(pId);
+      onToast(
+        language === 'bn'
+          ? 'ক্রয় চালান মুছে ফেলা হয়েছে এবং স্টক রিস্টোর হয়েছে!'
+          : 'Purchase record deleted and stock restored!',
+        'success'
+      );
+      setDeletingPurchase(null);
+      await loadData();
+      if (onRefreshProducts) onRefreshProducts();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to delete purchase', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -610,7 +743,7 @@ export const PurchasesManagement: React.FC<PurchasesManagementProps> = ({
                     <th className="py-3 px-3 text-right">Paid</th>
                     <th className="py-3 px-3 text-right">Due Amount</th>
                     <th className="py-3 px-3 text-center">Method</th>
-                    <th className="py-3 px-4 text-center">Details</th>
+                    <th className="py-3 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -643,13 +776,36 @@ export const PurchasesManagement: React.FC<PurchasesManagementProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={() => setViewingPurchase(pu)}
-                          className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 text-stone-600 cursor-pointer shadow-2xs"
-                          title="View Invoice Items"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => setViewingPurchase(pu)}
+                            className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 text-stone-600 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'চালান বিস্তারিত দেখুন' : 'View Memo Details'}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setPrintPurchase(pu)}
+                            className="p-1.5 rounded-lg border border-amber-200 bg-amber-50/50 hover:bg-amber-100 text-amber-800 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'চালান প্রিন্ট করুন' : 'Print Memo'}
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openEditModal(pu)}
+                            className="p-1.5 rounded-lg border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'চালান সম্পাদনা (Edit) করুন' : 'Edit Memo'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingPurchase(pu)}
+                            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'চালান মুছে ফেলুন' : 'Delete Memo'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -743,13 +899,510 @@ export const PurchasesManagement: React.FC<PurchasesManagementProps> = ({
               <p className="text-[11px] text-stone-500 italic">Notes: {viewingPurchase.notes}</p>
             )}
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-between items-center pt-2">
+              <button
+                onClick={() => {
+                  setPrintPurchase(viewingPurchase);
+                  setViewingPurchase(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>{language === 'bn' ? 'প্রিন্ট মেমো' : 'Print Memo'}</span>
+              </button>
               <button
                 onClick={() => setViewingPurchase(null)}
                 className="px-4 py-2 rounded-xl bg-stone-900 text-white font-bold text-xs cursor-pointer"
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* EDIT PURCHASE MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {editingPurchase && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl border border-stone-200 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-serif text-lg font-bold text-stone-900">
+                    {language === 'bn' ? 'ক্রয় চালান সম্পাদনা (Edit Purchase Memo)' : 'Edit Purchase Memo'}
+                  </h3>
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                    {editingPurchase.purchaseId || editingPurchase.id}
+                  </span>
+                </div>
+                <p className="text-stone-500 text-xs mt-0.5">
+                  {language === 'bn'
+                    ? 'পরিমাণ পরিবর্তন করলে স্বয়ংক্রিয়ভাবে স্টক এবং সাপ্লায়ার বকেয়া পুনরায় হিসাব হবে'
+                    : 'Modifying quantities will automatically recalculate product stock and supplier due.'}
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingPurchase(null)}
+                className="p-1.5 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePurchase} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'সাপ্লায়ার *' : 'Supplier *'}
+                  </label>
+                  <select
+                    value={editSupplierId}
+                    onChange={(e) => setEditSupplierId(e.target.value)}
+                    required
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-semibold"
+                  >
+                    <option value="">-- Select Supplier --</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.companyName || s.phone})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'চালানের তারিখ *' : 'Purchase Date *'}
+                  </label>
+                  <input
+                    type="date"
+                    value={editPurchaseDate}
+                    onChange={(e) => setEditPurchaseDate(e.target.value)}
+                    required
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-stone-800 uppercase tracking-wider text-[11px]">
+                    {language === 'bn' ? 'চালানের পোশাক আইটেম সমূহ' : 'Invoice Items'}
+                  </span>
+                  <span className="text-[11px] text-stone-500 font-medium">
+                    {editItems.length} items
+                  </span>
+                </div>
+
+                <div className="border border-stone-200 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-stone-100 font-bold text-stone-700 uppercase text-[10px]">
+                      <tr>
+                        <th className="py-2 px-3">Product</th>
+                        <th className="py-2 px-2 text-center w-24">Qty</th>
+                        <th className="py-2 px-2 text-right w-28">Unit Cost (৳)</th>
+                        <th className="py-2 px-3 text-right">Total</th>
+                        <th className="py-2 px-2 text-center w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {editItems.map((it, idx) => (
+                        <tr key={idx} className="hover:bg-stone-50">
+                          <td className="py-2 px-3 font-semibold text-stone-900">{it.productName}</td>
+                          <td className="py-2 px-2 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={it.quantity}
+                              onChange={(e) => {
+                                const q = Math.max(1, Number(e.target.value) || 1);
+                                const copy = [...editItems];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  quantity: q,
+                                  totalCost: q * copy[idx].unitCost,
+                                };
+                                setEditItems(copy);
+                              }}
+                              className="w-16 p-1 text-center font-bold border border-stone-300 rounded-lg"
+                            />
+                          </td>
+                          <td className="py-2 px-2 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              value={it.unitCost}
+                              onChange={(e) => {
+                                const c = Math.max(0, Number(e.target.value) || 0);
+                                const copy = [...editItems];
+                                copy[idx] = {
+                                  ...copy[idx],
+                                  unitCost: c,
+                                  totalCost: copy[idx].quantity * c,
+                                };
+                                setEditItems(copy);
+                              }}
+                              className="w-24 p-1 text-right font-bold border border-stone-300 rounded-lg"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-stone-900">
+                            {money(it.totalCost)}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEditItem(idx)}
+                              className="p-1 rounded hover:bg-rose-100 text-rose-600 cursor-pointer"
+                              title="Remove item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Add new item to invoice */}
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex flex-wrap items-center gap-2">
+                  <select
+                    value={editSelectedProductId}
+                    onChange={(e) => {
+                      const pid = e.target.value;
+                      setEditSelectedProductId(pid);
+                      const prod = products.find((p) => p.id === pid);
+                      if (prod) setEditSelectedCost(Number(prod.purchasePrice ?? prod.price * 0.7));
+                    }}
+                    className="flex-1 min-w-[180px] p-2 rounded-xl border border-stone-300 bg-white"
+                  >
+                    <option value="">-- Add another product --</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.titleEn || p.titleBn}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qty"
+                    value={editSelectedQty}
+                    onChange={(e) => setEditSelectedQty(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-16 p-2 rounded-xl border border-stone-300 font-bold text-center"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Cost (৳)"
+                    value={editSelectedCost}
+                    onChange={(e) => setEditSelectedCost(Number(e.target.value) || 0)}
+                    className="w-24 p-2 rounded-xl border border-stone-300 font-bold text-right"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddEditItem}
+                    className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-900 text-white font-bold cursor-pointer"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Financial Calculation Fields */}
+              <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Subtotal</label>
+                  <div className="p-2 rounded-xl bg-white border border-stone-200 font-mono font-bold">
+                    {money(editSubtotal)}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Transport / Other (৳)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editTransportCost}
+                    onChange={(e) => setEditTransportCost(Number(e.target.value) || 0)}
+                    className="w-full p-2 rounded-xl border border-stone-300 bg-white font-bold font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Discount (৳)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editDiscount}
+                    onChange={(e) => setEditDiscount(Number(e.target.value) || 0)}
+                    className="w-full p-2 rounded-xl border border-stone-300 bg-white font-bold font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-stone-900 mb-1">Grand Total</label>
+                  <div className="p-2 rounded-xl bg-white border border-stone-300 font-mono font-bold text-amber-900">
+                    {money(editGrandTotal)}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-emerald-800 mb-1">Paid Amount (৳)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editPaidAmount}
+                    onChange={(e) => setEditPaidAmount(Number(e.target.value) || 0)}
+                    className="w-full p-2 rounded-xl border border-emerald-300 bg-white font-bold font-mono text-emerald-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-rose-800 mb-1">Due Amount</label>
+                  <div className="p-2 rounded-xl bg-white border border-rose-300 font-mono font-bold text-rose-800">
+                    {money(editDueAmount)}
+                  </div>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Payment Method</label>
+                  <select
+                    value={editPaymentMethod}
+                    onChange={(e) => setEditPaymentMethod(e.target.value as PaymentAccountMethod)}
+                    className="w-full p-2 rounded-xl border border-stone-300 bg-white font-bold"
+                  >
+                    <option value="CASH">Cash in Hand</option>
+                    <option value="BKASH">bKash Send Money</option>
+                    <option value="NAGAD">Nagad</option>
+                    <option value="ROCKET">Rocket</option>
+                    <option value="BANK">Bank Account</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-stone-600 font-semibold mb-1">Notes / Remarks</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Invoice / shipment reference notes..."
+                  className="w-full p-2.5 rounded-xl border border-stone-300"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingPurchase(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="px-5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {editSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{editSaving ? 'Updating...' : 'Save & Recalculate'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* DELETE CONFIRMATION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {deletingPurchase && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-700 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'রেকর্ড মুছে ফেলার নিশ্চিতকরণ' : 'Delete Purchase Memo'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-rose-700">
+                  {deletingPurchase.purchaseId || deletingPurchase.id}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {language === 'bn'
+                ? 'আপনি কি নিশ্চিতভাবে এই রেকর্ডটি মুছে ফেলতে চান? এটি মুছে ফেললে সংশ্লিষ্ট স্টক এবং সাপ্লায়ার বকেয়া স্বয়ংক্রিয়ভাবে পূর্বের অবস্থায় ফিরিয়ে নেওয়া হবে।'
+                : 'Are you sure you want to delete this purchase memo? Stock increases and supplier due changes will be safely reversed.'}
+            </p>
+
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Supplier:</span>
+                <span className="font-semibold">{deletingPurchase.supplierName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Total Invoice Amount:</span>
+                <span className="font-mono font-bold text-stone-900">{money(deletingPurchase.grandTotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Items:</span>
+                <span>{(deletingPurchase.items || []).length} products</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeletingPurchase(null)}
+                className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDeletePurchase}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {deleting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{deleting ? 'Deleting...' : (language === 'bn' ? 'মুছে ফেলুন' : 'Delete')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* PROFESSIONAL PRINT VOUCHER MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {printPurchase && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-stone-200 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200 no-print">
+              <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                Voucher Print Preview
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => printSection(`Purchase_${printPurchase.purchaseId}`, 'purchase-voucher-print')}
+                  className="px-4 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Now</span>
+                </button>
+                <button
+                  onClick={() => setPrintPurchase(null)}
+                  className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Area */}
+            <div id="purchase-voucher-print" className="p-6 bg-white border border-stone-300 rounded-2xl space-y-5 text-stone-900 font-sans">
+              <div className="text-center border-b-2 border-stone-900 pb-3">
+                <h1 className="font-serif text-2xl font-black tracking-wide text-stone-950 uppercase">
+                  MINARUL FASHION HOUSE
+                </h1>
+                <p className="text-[11px] text-stone-600 font-medium">
+                  Premium Fashion & Quality Clothing • Chuadanga, Bangladesh
+                </p>
+                <div className="mt-2 inline-block px-3 py-1 rounded bg-stone-900 text-white text-[10px] font-bold uppercase tracking-widest">
+                  PURCHASE MEMO / ইনভেন্টরি চালান
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 text-xs gap-3">
+                <div>
+                  <span className="text-stone-500 block text-[10px] uppercase font-bold">Supplier Info:</span>
+                  <div className="font-bold text-stone-900 text-sm">{printPurchase.supplierName}</div>
+                  <div className="text-stone-600 text-[11px]">Supplier ID: {printPurchase.supplierId || '-'}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-stone-500 text-[10px] uppercase font-bold">Memo Number:</div>
+                  <div className="font-mono font-black text-sm text-stone-950">{printPurchase.purchaseId || printPurchase.id}</div>
+                  <div className="text-stone-600 text-[11px]">Date: {printPurchase.purchaseDate}</div>
+                </div>
+              </div>
+
+              <table className="w-full text-left text-xs border border-stone-300 border-collapse">
+                <thead className="bg-stone-100 font-bold uppercase text-[10px] border-b border-stone-300">
+                  <tr>
+                    <th className="p-2 border-r border-stone-300">#</th>
+                    <th className="p-2 border-r border-stone-300">Product Item</th>
+                    <th className="p-2 border-r border-stone-300 text-center">Qty</th>
+                    <th className="p-2 border-r border-stone-300 text-right">Unit Price</th>
+                    <th className="p-2 text-right">Total (৳)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-200">
+                  {(printPurchase.items || []).map((it, idx) => (
+                    <tr key={idx}>
+                      <td className="p-2 border-r border-stone-300 text-center text-stone-500">{idx + 1}</td>
+                      <td className="p-2 border-r border-stone-300 font-semibold">{it.productName}</td>
+                      <td className="p-2 border-r border-stone-300 text-center font-bold">{it.quantity}</td>
+                      <td className="p-2 border-r border-stone-300 text-right font-mono">{money(it.unitCost)}</td>
+                      <td className="p-2 text-right font-mono font-bold">{money(it.totalCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-end text-xs">
+                <div className="w-64 space-y-1">
+                  <div className="flex justify-between py-0.5 border-b border-stone-100">
+                    <span className="text-stone-600">Subtotal:</span>
+                    <span className="font-mono font-semibold">{money(printPurchase.subtotal)}</span>
+                  </div>
+                  {Number(printPurchase.transportCost || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-stone-100">
+                      <span className="text-stone-600">Transport:</span>
+                      <span className="font-mono font-semibold">+{money(printPurchase.transportCost || 0)}</span>
+                    </div>
+                  )}
+                  {Number(printPurchase.discount || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-stone-100">
+                      <span className="text-stone-600">Discount:</span>
+                      <span className="font-mono font-semibold">-{money(printPurchase.discount || 0)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between py-1 border-t-2 border-stone-900 font-black text-sm">
+                    <span>Grand Total:</span>
+                    <span className="font-mono">{money(printPurchase.grandTotal)}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-emerald-800 font-bold">
+                    <span>Paid Amount:</span>
+                    <span className="font-mono">{money(printPurchase.paidAmount || 0)}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-rose-800 font-black">
+                    <span>Due Amount:</span>
+                    <span className="font-mono">{money(printPurchase.dueAmount || 0)}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-stone-500 text-[10px]">
+                    <span>Payment Method:</span>
+                    <span className="font-bold uppercase">{printPurchase.paymentMethod || 'Cash'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {printPurchase.notes && (
+                <div className="text-[11px] text-stone-600 border-t border-stone-200 pt-2 italic">
+                  Note: {printPurchase.notes}
+                </div>
+              )}
+
+              <div className="pt-8 grid grid-cols-2 text-center text-xs text-stone-600">
+                <div>
+                  <div className="border-t border-stone-400 w-36 mx-auto pt-1">Prepared By</div>
+                </div>
+                <div>
+                  <div className="border-t border-stone-400 w-36 mx-auto pt-1 font-bold">Authorized Signature</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

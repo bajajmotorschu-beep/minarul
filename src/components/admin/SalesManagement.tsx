@@ -11,6 +11,9 @@ import {
   Calendar,
   X,
   Eye,
+  Pencil,
+  Trash2,
+  AlertTriangle,
   CheckCircle2,
 } from 'lucide-react';
 import { Sale, Order, PaymentAccountMethod } from '../../types';
@@ -46,6 +49,19 @@ export const SalesManagement: React.FC<SalesManagementProps> = ({ orders, onToas
   const [returnMethod, setReturnMethod] = useState<PaymentAccountMethod>('CASH');
   const [returnReason, setReturnReason] = useState('');
   const [returnSaving, setReturnSaving] = useState(false);
+
+  // Edit, Delete & Print Sales Memo States
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editTotalAmount, setEditTotalAmount] = useState<number>(0);
+  const [editPaymentStatus, setEditPaymentStatus] = useState('paid');
+  const [editSaleStatus, setEditSaleStatus] = useState('delivered');
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const [deletingSale, setDeletingSale] = useState<Sale | null>(null);
+  const [deletingLoading, setDeletingLoading] = useState(false);
+  const [printSale, setPrintSale] = useState<Sale | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -147,6 +163,66 @@ export const SalesManagement: React.FC<SalesManagementProps> = ({ orders, onToas
       onToast(err?.message || 'Sales return failed', 'error');
     } finally {
       setReturnSaving(false);
+    }
+  };
+
+  // Open Edit Sale Modal
+  const openEditSaleModal = (s: Sale) => {
+    setEditingSale(s);
+    setEditCustomerName(s.customerName || '');
+    setEditTotalAmount(Number(s.totalAmount) || 0);
+    setEditPaymentStatus(s.paymentStatus || 'paid');
+    setEditSaleStatus(s.saleStatus || 'delivered');
+    setEditNotes(s.notes || '');
+  };
+
+  // Handle Update Sale
+  const handleUpdateSale = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSale) return;
+    setEditSaving(true);
+    try {
+      const sId = editingSale.saleId || editingSale.id || '';
+      await businessService.updateSale(sId, {
+        customerName: editCustomerName.trim(),
+        totalAmount: Number(editTotalAmount) || 0,
+        paymentStatus: editPaymentStatus,
+        saleStatus: editSaleStatus,
+        notes: editNotes.trim(),
+      });
+      onToast(language === 'bn' ? 'সেলস মেমো সফলভাবে আপডেট হয়েছে!' : 'Sales memo updated successfully!', 'success');
+      setEditingSale(null);
+      await loadData();
+      if (onRefreshOrders) onRefreshOrders();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to update sale', 'error');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // Handle Delete Sale
+  const handleDeleteSale = async () => {
+    if (!deletingSale) return;
+    setDeletingLoading(true);
+    try {
+      const sId = deletingSale.saleId || deletingSale.id || '';
+      await businessService.deleteSale(sId);
+      onToast(
+        language === 'bn'
+          ? 'সেলস মেমো মুছে ফেলা হয়েছে এবং পণ্যের স্টক রিস্টোর হয়েছে!'
+          : 'Sales memo deleted and inventory stock restored!',
+        'success'
+      );
+      setDeletingSale(null);
+      await loadData();
+      if (onRefreshOrders) onRefreshOrders();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to delete sale', 'error');
+    } finally {
+      setDeletingLoading(false);
     }
   };
 
@@ -327,21 +403,45 @@ export const SalesManagement: React.FC<SalesManagementProps> = ({ orders, onToas
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => setViewingSale(s)}
                             className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 text-stone-600 cursor-pointer shadow-2xs"
-                            title="View Itemized Breakdown"
+                            title={language === 'bn' ? 'মেমো দেখুন' : 'View Memo'}
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
 
                           <button
+                            onClick={() => setPrintSale(s)}
+                            className="p-1.5 rounded-lg border border-amber-200 bg-amber-50/50 hover:bg-amber-100 text-amber-800 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'ক্যাশ মেমো প্রিন্ট করুন' : 'Print Sales Memo'}
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            onClick={() => openEditSaleModal(s)}
+                            className="p-1.5 rounded-lg border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'মেমো সম্পাদনা করুন' : 'Edit Memo'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
                             onClick={() => openReturnModal(s.orderId)}
-                            className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold transition-all cursor-pointer"
-                            title="Return an item from this sale"
+                            className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold transition-all cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'পণ্য ফেরত / রিটার্ন' : 'Sales Return'}
                           >
                             Return
+                          </button>
+
+                          <button
+                            onClick={() => setDeletingSale(s)}
+                            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'মেমো মুছে ফেলুন' : 'Delete Memo'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -601,6 +701,313 @@ export const SalesManagement: React.FC<SalesManagementProps> = ({ orders, onToas
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* EDIT SALE MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {editingSale && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'সেলস মেমো সম্পাদনা (Edit Sales Memo)' : 'Edit Sales Memo'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-blue-800">
+                  {editingSale.saleId || editingSale.id}
+                </span>
+              </div>
+              <button
+                onClick={() => setEditingSale(null)}
+                className="p-1.5 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSale} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editCustomerName}
+                  onChange={(e) => setEditCustomerName(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'মোট বিক্রয়মূল্য (৳)' : 'Total Amount (৳)'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  value={editTotalAmount}
+                  onChange={(e) => setEditTotalAmount(Number(e.target.value) || 0)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 font-mono font-bold text-stone-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">Payment Status</label>
+                  <select
+                    value={editPaymentStatus}
+                    onChange={(e) => setEditPaymentStatus(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-bold"
+                  >
+                    <option value="paid">Paid</option>
+                    <option value="unpaid">Unpaid / Due</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">Sale / Delivery Status</label>
+                  <select
+                    value={editSaleStatus}
+                    onChange={(e) => setEditSaleStatus(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-bold"
+                  >
+                    <option value="delivered">Delivered</option>
+                    <option value="shipped">Shipped</option>
+                    <option value="processing">Processing</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">Notes / Remarks</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Sales invoice remarks..."
+                  className="w-full p-2.5 rounded-xl border border-stone-300"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingSale(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="px-5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {editSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{editSaving ? 'Updating...' : 'Update Sale'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* DELETE SALE CONFIRMATION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {deletingSale && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-700 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'রেকর্ড মুছে ফেলার নিশ্চিতকরণ' : 'Delete Sales Memo'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-rose-700">
+                  {deletingSale.saleId || deletingSale.id}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {language === 'bn'
+                ? 'আপনি কি নিশ্চিতভাবে এই রেকর্ডটি মুছে ফেলতে চান? এটি মুছে ফেললে অর্ডারের বিক্রিত পণ্যসমূহ স্বয়ংক্রিয়ভাবে ইনভেন্টরি স্টকে ফেরত যোগ হবে।'
+                : 'Are you sure you want to delete this sales memo? All items from this sale will be returned to inventory stock.'}
+            </p>
+
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Customer:</span>
+                <span className="font-semibold">{deletingSale.customerName || 'Customer'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Total Sale Amount:</span>
+                <span className="font-mono font-bold text-stone-900">{money(deletingSale.totalAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Items:</span>
+                <span>{(deletingSale.items || []).length} products</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deletingLoading}
+                onClick={() => setDeletingSale(null)}
+                className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingLoading}
+                onClick={handleDeleteSale}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {deletingLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{deletingLoading ? 'Deleting...' : (language === 'bn' ? 'মুছে ফেলুন' : 'Delete')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* PROFESSIONAL PRINTABLE SALES CASH MEMO */}
+      {/* ------------------------------------------------------------- */}
+      {printSale && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl border border-stone-200 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200 no-print">
+              <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                Sales Cash Memo Preview
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => printSection(`SalesMemo_${printSale.saleId}`, 'sales-memo-print-area')}
+                  className="px-4 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Memo</span>
+                </button>
+                <button
+                  onClick={() => setPrintSale(null)}
+                  className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Area */}
+            <div id="sales-memo-print-area" className="p-6 bg-white border border-stone-300 rounded-2xl space-y-5 text-stone-900 font-sans">
+              <div className="text-center border-b-2 border-stone-900 pb-3">
+                <h1 className="font-serif text-2xl font-black tracking-wide text-stone-950 uppercase">
+                  MINARUL FASHION HOUSE
+                </h1>
+                <p className="text-[11px] text-stone-600 font-medium">
+                  Premium Fashion & Quality Clothing • Chuadanga, Bangladesh
+                </p>
+                <div className="mt-2 inline-block px-3 py-1 rounded bg-stone-900 text-white text-[10px] font-bold uppercase tracking-widest">
+                  SALES MEMO / ক্যাশ মেমো
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 text-xs gap-3">
+                <div>
+                  <span className="text-stone-500 block text-[10px] uppercase font-bold">Customer Info:</span>
+                  <div className="font-bold text-stone-900 text-sm">{printSale.customerName || 'Walk-in Customer'}</div>
+                  <div className="text-stone-600 text-[11px]">Order Ref: #{printSale.orderId}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-stone-500 text-[10px] uppercase font-bold">Memo Number:</div>
+                  <div className="font-mono font-black text-sm text-stone-950">{printSale.saleId || printSale.id}</div>
+                  <div className="text-stone-600 text-[11px]">
+                    Date: {printSale.createdAt?.toDate ? printSale.createdAt.toDate().toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB')}
+                  </div>
+                </div>
+              </div>
+
+              <table className="w-full text-left text-xs border border-stone-300 border-collapse">
+                <thead className="bg-stone-100 font-bold uppercase text-[10px] border-b border-stone-300">
+                  <tr>
+                    <th className="p-2 border-r border-stone-300">#</th>
+                    <th className="p-2 border-r border-stone-300">Product Item</th>
+                    <th className="p-2 border-r border-stone-300 text-center">Qty</th>
+                    <th className="p-2 border-r border-stone-300 text-right">Price</th>
+                    <th className="p-2 text-right">Total (৳)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-200">
+                  {(printSale.items || []).map((it, idx) => (
+                    <tr key={idx}>
+                      <td className="p-2 border-r border-stone-300 text-center text-stone-500">{idx + 1}</td>
+                      <td className="p-2 border-r border-stone-300 font-semibold">{it.productName}</td>
+                      <td className="p-2 border-r border-stone-300 text-center font-bold">{it.quantity}</td>
+                      <td className="p-2 border-r border-stone-300 text-right font-mono">{money(it.sellingPrice)}</td>
+                      <td className="p-2 text-right font-mono font-bold">{money(it.totalSelling)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-end text-xs">
+                <div className="w-64 space-y-1">
+                  <div className="flex justify-between py-0.5 border-b border-stone-100">
+                    <span className="text-stone-600">Subtotal:</span>
+                    <span className="font-mono font-semibold">{money(printSale.subtotal || printSale.totalAmount)}</span>
+                  </div>
+                  {Number(printSale.deliveryCharge || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-stone-100">
+                      <span className="text-stone-600">Delivery Charge:</span>
+                      <span className="font-mono font-semibold">+{money(printSale.deliveryCharge || 0)}</span>
+                    </div>
+                  )}
+                  {Number(printSale.discount || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-stone-100">
+                      <span className="text-stone-600">Discount:</span>
+                      <span className="font-mono font-semibold">-{money(printSale.discount || 0)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between py-1 border-t-2 border-stone-900 font-black text-sm">
+                    <span>Total Amount:</span>
+                    <span className="font-mono">{money(printSale.totalAmount)}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-stone-600 text-[10px]">
+                    <span>Payment Method:</span>
+                    <span className="font-bold uppercase">{printSale.paymentMethod || 'COD'}</span>
+                  </div>
+                  <div className="flex justify-between py-0.5 text-stone-600 text-[10px]">
+                    <span>Payment Status:</span>
+                    <span className="font-bold uppercase text-emerald-800">{printSale.paymentStatus || 'Paid'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {printSale.notes && (
+                <div className="text-[11px] text-stone-600 border-t border-stone-200 pt-2 italic">
+                  Note: {printSale.notes}
+                </div>
+              )}
+
+              <div className="pt-8 grid grid-cols-2 text-center text-xs text-stone-600">
+                <div>
+                  <div className="border-t border-stone-400 w-36 mx-auto pt-1">Customer Signature</div>
+                </div>
+                <div>
+                  <div className="border-t border-stone-400 w-36 mx-auto pt-1 font-bold">Authorized Signature</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

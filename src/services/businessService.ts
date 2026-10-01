@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import {
   Expense,
@@ -17,6 +18,7 @@ import {
   Sale,
   Supplier,
   StockMovement,
+  StockMovementType,
   StockAdjustment,
   CashTransaction,
   SupplierPayment,
@@ -145,6 +147,11 @@ export const businessService = {
     );
   },
 
+  async deleteSupplier(id: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    await deleteDoc(doc(db, 'suppliers', id));
+  },
+
   // =========================================================================
   // 3. EXPENSE MANAGEMENT
   // =========================================================================
@@ -192,6 +199,67 @@ export const businessService = {
     });
   },
 
+  async updateExpense(id: string, input: Partial<Expense>) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const amount = input.amount !== undefined ? Number(input.amount) || 0 : undefined;
+    const method = input.paymentMethod ? (input.paymentMethod as string).toUpperCase() : undefined;
+    const normalizedMethod: PaymentAccountMethod | undefined = method
+      ? ['CASH', 'BKASH', 'NAGAD', 'ROCKET', 'BANK'].includes(method)
+        ? (method as PaymentAccountMethod)
+        : 'CASH'
+      : undefined;
+
+    await runTransaction(db, async (tx) => {
+      const expRef = doc(db, 'expenses', id);
+      const expSnap = await tx.get(expRef);
+      if (!expSnap.exists()) throw new Error('EXPENSE_NOT_FOUND');
+
+      const updateData: any = {
+        ...input,
+        updatedAt: serverTimestamp(),
+      };
+      if (amount !== undefined) updateData.amount = amount;
+      if (normalizedMethod) updateData.paymentMethod = normalizedMethod;
+
+      tx.update(expRef, clean(updateData));
+
+      // Also update linked cash transaction
+      const txId = `CTX-${id}`;
+      const ctxRef = doc(db, 'cashTransactions', txId);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        const ctxUpdate: any = {
+          updatedAt: serverTimestamp(),
+        };
+        if (amount !== undefined) ctxUpdate.amount = amount;
+        if (normalizedMethod) ctxUpdate.paymentMethod = normalizedMethod;
+        if (input.category || input.description) {
+          ctxUpdate.description = `${input.category || expSnap.data().category}: ${input.description || expSnap.data().description || 'Expense payment'}`;
+        }
+        tx.update(ctxRef, clean(ctxUpdate));
+      }
+    });
+  },
+
+  async deleteExpense(id: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    await runTransaction(db, async (tx) => {
+      const expRef = doc(db, 'expenses', id);
+      const expSnap = await tx.get(expRef);
+      if (!expSnap.exists()) return;
+
+      tx.delete(expRef);
+
+      // Delete linked cash transaction
+      const txId = `CTX-${id}`;
+      const ctxRef = doc(db, 'cashTransactions', txId);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        tx.delete(ctxRef);
+      }
+    });
+  },
+
   // =========================================================================
   // 4. CASH TRANSACTION MANAGEMENT
   // =========================================================================
@@ -208,6 +276,23 @@ export const businessService = {
         createdAt: serverTimestamp(),
       })
     );
+  },
+
+  async updateCashTransaction(id: string, input: Partial<CashTransaction>) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const updatePayload: any = {
+      ...input,
+      updatedAt: serverTimestamp(),
+    };
+    if (input.amount !== undefined) {
+      updatePayload.amount = Number(input.amount) || 0;
+    }
+    await updateDoc(doc(db, 'cashTransactions', id), clean(updatePayload));
+  },
+
+  async deleteCashTransaction(id: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    await deleteDoc(doc(db, 'cashTransactions', id));
   },
 
   // =========================================================================
@@ -280,6 +365,95 @@ export const businessService = {
           createdAt: serverTimestamp(),
         })
       );
+    });
+  },
+
+  async updateSupplierPayment(
+    paymentId: string,
+    input: {
+      paymentAmount: number;
+      paymentMethod: PaymentAccountMethod;
+      date?: string;
+      note?: string;
+    }
+  ) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const payRef = doc(db, 'supplierPayments', paymentId);
+
+    await runTransaction(db, async (tx) => {
+      const paySnap = await tx.get(payRef);
+      if (!paySnap.exists()) throw new Error('PAYMENT_NOT_FOUND');
+      const oldPay = paySnap.data();
+      const oldAmount = Number(oldPay.paymentAmount) || 0;
+      const newAmount = Number(input.paymentAmount) || 0;
+      const diff = newAmount - oldAmount;
+
+      const supplierRef = doc(db, 'suppliers', oldPay.supplierId);
+      const sSnap = await tx.get(supplierRef);
+      if (sSnap.exists()) {
+        const sData = sSnap.data();
+        const curDue = Number(sData.currentDue ?? sData.openingDue ?? 0);
+        const updatedDue = Math.max(0, curDue - diff);
+        tx.update(supplierRef, {
+          currentDue: updatedDue,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      tx.update(payRef, clean({
+        paymentAmount: newAmount,
+        paymentMethod: input.paymentMethod,
+        date: input.date || oldPay.date,
+        note: input.note !== undefined ? input.note : oldPay.note,
+        updatedAt: serverTimestamp(),
+      }));
+
+      // Update linked cash transaction
+      const ctxId = `CTX-${paymentId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        tx.update(ctxRef, clean({
+          amount: newAmount,
+          paymentMethod: input.paymentMethod,
+          updatedAt: serverTimestamp(),
+        }));
+      }
+    });
+  },
+
+  async deleteSupplierPayment(paymentId: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const payRef = doc(db, 'supplierPayments', paymentId);
+
+    await runTransaction(db, async (tx) => {
+      const paySnap = await tx.get(payRef);
+      if (!paySnap.exists()) return;
+      const oldPay = paySnap.data();
+      const oldAmount = Number(oldPay.paymentAmount) || 0;
+
+      // Restore supplier due (undoing the payment)
+      const supplierRef = doc(db, 'suppliers', oldPay.supplierId);
+      const sSnap = await tx.get(supplierRef);
+      if (sSnap.exists()) {
+        const sData = sSnap.data();
+        const curDue = Number(sData.currentDue ?? sData.openingDue ?? 0);
+        tx.update(supplierRef, {
+          currentDue: curDue + oldAmount,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      // Delete payment
+      tx.delete(payRef);
+
+      // Delete linked cash transaction
+      const ctxId = `CTX-${paymentId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        tx.delete(ctxRef);
+      }
     });
   },
 
@@ -412,6 +586,210 @@ export const businessService = {
     });
   },
 
+  async updatePurchase(
+    purchaseId: string,
+    input: Partial<Purchase>
+  ) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const purRef = doc(db, 'purchases', purchaseId);
+
+    await runTransaction(db, async (tx) => {
+      const purSnap = await tx.get(purRef);
+      if (!purSnap.exists()) throw new Error('PURCHASE_NOT_FOUND');
+      const oldPur = purSnap.data() as Purchase;
+
+      // 1. Stock adjustments for modified item quantities
+      if (input.items && Array.isArray(input.items)) {
+        const oldItemsMap = new Map<string, number>();
+        for (const item of oldPur.items || []) {
+          oldItemsMap.set(item.productId, Number(item.quantity) || 0);
+        }
+
+        for (const newItem of input.items) {
+          const oldQty = oldItemsMap.get(newItem.productId) || 0;
+          const newQty = Number(newItem.quantity) || 0;
+          const delta = newQty - oldQty;
+
+          if (delta !== 0) {
+            const pRef = doc(db, 'products', newItem.productId);
+            const pSnap = await tx.get(pRef);
+            if (pSnap.exists()) {
+              const pData = pSnap.data();
+              const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+              const updatedStock = Math.max(0, curStock + delta);
+              tx.update(pRef, {
+                stock: updatedStock,
+                stockQuantity: updatedStock,
+                updatedAt: serverTimestamp(),
+              });
+
+              // Log adjustment movement
+              const stmId = `STM-UPDATE-${purchaseId}-${newItem.productId}-${Date.now().toString(36)}`;
+              tx.set(
+                doc(db, 'stockMovements', stmId),
+                clean({
+                  movementId: stmId,
+                  productId: newItem.productId,
+                  productName: newItem.productName,
+                  type: 'MANUAL_CORRECTION',
+                  movementType: 'manual_correction',
+                  quantity: delta,
+                  previousStock: curStock,
+                  newStock: updatedStock,
+                  unitCost: Number(newItem.unitCost) || 0,
+                  totalValue: Math.abs(delta) * (Number(newItem.unitCost) || 0),
+                  referenceType: 'purchase_edit',
+                  referenceId: purchaseId,
+                  note: `Purchase #${purchaseId} quantity updated (${oldQty} -> ${newQty})`,
+                  createdBy: auth.currentUser!.uid,
+                  createdAt: serverTimestamp(),
+                })
+              );
+            }
+          }
+        }
+      }
+
+      // 2. Adjust supplier due if dueAmount changed
+      if (input.dueAmount !== undefined && oldPur.supplierId) {
+        const oldDue = Number(oldPur.dueAmount) || 0;
+        const newDue = Number(input.dueAmount) || 0;
+        const dueDiff = newDue - oldDue;
+        if (dueDiff !== 0) {
+          const sRef = doc(db, 'suppliers', oldPur.supplierId);
+          const sSnap = await tx.get(sRef);
+          if (sSnap.exists()) {
+            const curSupplierDue = Number(sSnap.data().currentDue ?? sSnap.data().openingDue ?? 0);
+            tx.update(sRef, {
+              currentDue: Math.max(0, curSupplierDue + dueDiff),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      // 3. Update purchase document
+      tx.update(purRef, clean({
+        ...input,
+        updatedAt: serverTimestamp(),
+      }));
+
+      // 4. Update downpayment if paidAmount changed
+      if (input.paidAmount !== undefined) {
+        const spayId = `SPAY-${purchaseId}`;
+        const spayRef = doc(db, 'supplierPayments', spayId);
+        const spaySnap = await tx.get(spayRef);
+        if (spaySnap.exists()) {
+          tx.update(spayRef, clean({
+            paymentAmount: Number(input.paidAmount) || 0,
+            paymentMethod: input.paymentMethod || oldPur.paymentMethod,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+
+        const ctxId = `CTX-${spayId}`;
+        const ctxRef = doc(db, 'cashTransactions', ctxId);
+        const ctxSnap = await tx.get(ctxRef);
+        if (ctxSnap.exists()) {
+          tx.update(ctxRef, clean({
+            amount: Number(input.paidAmount) || 0,
+            paymentMethod: input.paymentMethod || oldPur.paymentMethod,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+      }
+    });
+  },
+
+  async deletePurchase(purchaseId: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const purRef = doc(db, 'purchases', purchaseId);
+
+    await runTransaction(db, async (tx) => {
+      const purSnap = await tx.get(purRef);
+      if (!purSnap.exists()) return;
+      const pur = purSnap.data() as Purchase;
+
+      // 1. Rollback stock for all items
+      for (const item of pur.items || []) {
+        const pRef = doc(db, 'products', item.productId);
+        const pSnap = await tx.get(pRef);
+        if (pSnap.exists()) {
+          const pData = pSnap.data();
+          const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+          const rollbackStock = Math.max(0, curStock - (Number(item.quantity) || 0));
+          tx.update(pRef, {
+            stock: rollbackStock,
+            stockQuantity: rollbackStock,
+            updatedAt: serverTimestamp(),
+          });
+
+          // Delete purchase movement
+          const mRef = doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}`);
+          const mSnap = await tx.get(mRef);
+          if (mSnap.exists()) {
+            tx.delete(mRef);
+          }
+
+          // Log rollback movement
+          const stmId = `STM-DEL-${purchaseId}-${item.productId}`;
+          tx.set(
+            doc(db, 'stockMovements', stmId),
+            clean({
+              movementId: stmId,
+              productId: item.productId,
+              productName: item.productName,
+              type: 'PURCHASE_RETURN',
+              movementType: 'purchase_return',
+              quantity: -(Number(item.quantity) || 0),
+              previousStock: curStock,
+              newStock: rollbackStock,
+              unitCost: Number(item.unitCost) || 0,
+              totalValue: (Number(item.quantity) || 0) * (Number(item.unitCost) || 0),
+              referenceType: 'purchase_deleted',
+              referenceId: purchaseId,
+              note: `Purchase #${purchaseId} deleted/rolled back`,
+              createdBy: auth.currentUser!.uid,
+              createdAt: serverTimestamp(),
+            })
+          );
+        }
+      }
+
+      // 2. Rollback supplier due
+      const dueAmount = Number(pur.dueAmount) || 0;
+      if (pur.supplierId && dueAmount > 0) {
+        const sRef = doc(db, 'suppliers', pur.supplierId);
+        const sSnap = await tx.get(sRef);
+        if (sSnap.exists()) {
+          const curDue = Number(sSnap.data().currentDue ?? sSnap.data().openingDue ?? 0);
+          tx.update(sRef, {
+            currentDue: Math.max(0, curDue - dueAmount),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+
+      // 3. Rollback paid amount if paid
+      const spayId = `SPAY-${purchaseId}`;
+      const spayRef = doc(db, 'supplierPayments', spayId);
+      const spaySnap = await tx.get(spayRef);
+      if (spaySnap.exists()) {
+        tx.delete(spayRef);
+      }
+
+      const ctxId = `CTX-${spayId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        tx.delete(ctxRef);
+      }
+
+      // 4. Delete purchase document
+      tx.delete(purRef);
+    });
+  },
+
   // =========================================================================
   // 7. STOCK ADJUSTMENT
   // =========================================================================
@@ -493,6 +871,100 @@ export const businessService = {
           createdAt: serverTimestamp(),
         })
       );
+    });
+  },
+
+  async updateStockAdjustment(
+    adjustmentId: string,
+    input: {
+      quantity: number;
+      reason: string;
+      note?: string;
+      adjustmentType?: string;
+    }
+  ) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const adjRef = doc(db, 'stockAdjustments', adjustmentId);
+
+    await runTransaction(db, async (tx) => {
+      const adjSnap = await tx.get(adjRef);
+      if (!adjSnap.exists()) throw new Error('ADJUSTMENT_NOT_FOUND');
+      const oldAdj = adjSnap.data() as StockAdjustment;
+
+      const pRef = doc(db, 'products', oldAdj.productId);
+      const pSnap = await tx.get(pRef);
+      if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
+      const pData = pSnap.data();
+      const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+
+      const oldDelta = Number(oldAdj.quantity) || 0;
+      const type = input.adjustmentType || oldAdj.adjustmentType;
+      let newDelta = Math.abs(Number(input.quantity) || 0);
+      if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(type)) {
+        newDelta = -newDelta;
+      }
+
+      const netChange = newDelta - oldDelta;
+      const newStock = Math.max(0, curStock + netChange);
+
+      tx.update(pRef, {
+        stock: newStock,
+        stockQuantity: newStock,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(adjRef, clean({
+        quantity: newDelta,
+        adjustmentType: type,
+        reason: input.reason,
+        note: input.note || '',
+        newStock,
+        updatedAt: serverTimestamp(),
+      }));
+
+      // Update movement
+      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+      const stmSnap = await tx.get(stmRef);
+      if (stmSnap.exists()) {
+        tx.update(stmRef, clean({
+          quantity: newDelta,
+          type: type as StockMovementType,
+          newStock,
+          note: `${type}: ${input.reason}`,
+          updatedAt: serverTimestamp(),
+        }));
+      }
+    });
+  },
+
+  async deleteStockAdjustment(adjustmentId: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const adjRef = doc(db, 'stockAdjustments', adjustmentId);
+
+    await runTransaction(db, async (tx) => {
+      const adjSnap = await tx.get(adjRef);
+      if (!adjSnap.exists()) return;
+      const adj = adjSnap.data() as StockAdjustment;
+
+      const pRef = doc(db, 'products', adj.productId);
+      const pSnap = await tx.get(pRef);
+      if (pSnap.exists()) {
+        const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
+        const rollbackStock = Math.max(0, curStock - (Number(adj.quantity) || 0));
+        tx.update(pRef, {
+          stock: rollbackStock,
+          stockQuantity: rollbackStock,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      tx.delete(adjRef);
+
+      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+      const stmSnap = await tx.get(stmRef);
+      if (stmSnap.exists()) {
+        tx.delete(stmRef);
+      }
     });
   },
 
@@ -628,6 +1100,60 @@ export const businessService = {
           })
         );
       }
+    });
+  },
+
+  async updateSale(
+    saleId: string,
+    input: Partial<Sale>
+  ) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    await updateDoc(doc(db, 'sales', saleId), clean({
+      ...input,
+      updatedAt: serverTimestamp(),
+    }));
+  },
+
+  async deleteSale(saleId: string) {
+    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const saleRef = doc(db, 'sales', saleId);
+
+    await runTransaction(db, async (tx) => {
+      const saleSnap = await tx.get(saleRef);
+      if (!saleSnap.exists()) return;
+      const sale = saleSnap.data() as Sale;
+
+      // 1. Restore stock
+      for (const item of sale.items || []) {
+        const pRef = doc(db, 'products', item.productId);
+        const pSnap = await tx.get(pRef);
+        if (pSnap.exists()) {
+          const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
+          const restoredStock = curStock + (Number(item.quantity) || 0);
+          tx.update(pRef, {
+            stock: restoredStock,
+            stockQuantity: restoredStock,
+            updatedAt: serverTimestamp(),
+          });
+
+          // Delete sale stock movement
+          const mRef = doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}`);
+          const mSnap = await tx.get(mRef);
+          if (mSnap.exists()) {
+            tx.delete(mRef);
+          }
+        }
+      }
+
+      // 2. Delete linked cash transaction if any
+      const ctxRef = doc(db, 'cashTransactions', `CTX-SALE-${sale.orderId}`);
+      const ctxSnap = await tx.get(ctxRef);
+      if (ctxSnap.exists()) {
+        tx.delete(ctxRef);
+      }
+
+      // 3. Delete sale
+      tx.delete(saleRef);
     });
   },
 

@@ -580,7 +580,9 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                     <div className="p-3.5 bg-amber-50/80 rounded-xl border border-amber-200/80 text-xs space-y-2">
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
-                          {paymentMethod.toUpperCase()} Merchant Number:
+                          {paymentMethod === 'bkash'
+                            ? (language === 'bn' ? 'বিকাশ Send Money নম্বর:' : 'bKash Send Money Number:')
+                            : `${paymentMethod.toUpperCase()} Account Number:`}
                         </span>
                         <span className="font-mono text-sm font-extrabold text-stone-900 bg-white px-2.5 py-1 rounded-lg border border-amber-300">
                           {paymentMethod === 'bkash'
@@ -591,9 +593,13 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-amber-900 leading-relaxed">
-                        {language === 'bn'
-                          ? `উপরের মার্চেন্ট নম্বরে ৳${grandTotal} টাকা Send Money বা Payment করে প্রেরক নম্বর এবং SMS-এ পাওয়া Transaction ID (TrxID) নিচে প্রদান করুন:`
-                          : `Send ${formatPrice(grandTotal)} to the merchant number above, then enter your sender number and SMS Transaction ID (TrxID) below:`}
+                        {paymentMethod === 'bkash'
+                          ? (language === 'bn'
+                              ? `উপরের বিকাশ নম্বরে ৳${grandTotal} টাকা Send Money করে প্রেরক মোবাইল নম্বর এবং SMS-এ পাওয়া Transaction ID (TrxID) নিচে প্রদান করুন:`
+                              : `Send ${formatPrice(grandTotal)} to the bKash Send Money number above, then enter your sender number and SMS Transaction ID (TrxID) below:`)
+                          : (language === 'bn'
+                              ? `উপরের নম্বরে ৳${grandTotal} টাকা পরিশোধ করে প্রেরক নম্বর এবং SMS-এ পাওয়া Transaction ID (TrxID) নিচে প্রদান করুন:`
+                              : `Send ${formatPrice(grandTotal)} to the account number above, then enter your sender number and SMS Transaction ID (TrxID) below:`)}
                       </p>
                     </div>
 

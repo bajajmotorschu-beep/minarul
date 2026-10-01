@@ -15,6 +15,10 @@ import {
   X,
   CreditCard,
   Calendar,
+  Eye,
+  Pencil,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Supplier, SupplierPayment, Purchase, PaymentAccountMethod } from '../../types';
 import { businessService } from '../../services/businessService';
@@ -64,6 +68,34 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
   const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
   const [payNote, setPayNote] = useState('');
   const [paySaving, setPaySaving] = useState(false);
+
+  // Edit & Delete Supplier States
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editSupplierForm, setEditSupplierForm] = useState({
+    name: '',
+    companyName: '',
+    phone: '',
+    email: '',
+    address: '',
+    openingDue: 0,
+    notes: '',
+  });
+  const [editSupplierSaving, setEditSupplierSaving] = useState(false);
+  const [deletingSupplier, setDeletingSupplier] = useState<Supplier | null>(null);
+  const [deletingSupLoading, setDeletingSupLoading] = useState(false);
+
+  // Edit, Delete, View & Print Supplier Payment States
+  const [editingPayment, setEditingPayment] = useState<SupplierPayment | null>(null);
+  const [editPayAmount, setEditPayAmount] = useState<number>(0);
+  const [editPayMethod, setEditPayMethod] = useState<PaymentAccountMethod>('CASH');
+  const [editPayDate, setEditPayDate] = useState('');
+  const [editPayNote, setEditPayNote] = useState('');
+  const [editPaySaving, setEditPaySaving] = useState(false);
+
+  const [deletingPayment, setDeletingPayment] = useState<SupplierPayment | null>(null);
+  const [deletingPayLoading, setDeletingPayLoading] = useState(false);
+  const [viewingPayment, setViewingPayment] = useState<SupplierPayment | null>(null);
+  const [printPayment, setPrintPayment] = useState<SupplierPayment | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -209,6 +241,127 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
       onToast(err?.message || 'Payment failed', 'error');
     } finally {
       setPaySaving(false);
+    }
+  };
+
+  // Open Edit Supplier Modal
+  const openEditSupplierModal = (s: Supplier) => {
+    setEditingSupplier(s);
+    setEditSupplierForm({
+      name: s.name || '',
+      companyName: s.companyName || '',
+      phone: s.phone || '',
+      email: s.email || '',
+      address: s.address || '',
+      openingDue: Number(s.openingDue) || 0,
+      notes: s.notes || '',
+    });
+  };
+
+  // Handle Update Supplier
+  const handleUpdateSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSupplier) return;
+    if (!editSupplierForm.name.trim()) {
+      onToast('Supplier name is required', 'error');
+      return;
+    }
+    setEditSupplierSaving(true);
+    try {
+      await businessService.updateSupplier(editingSupplier.id, {
+        name: editSupplierForm.name.trim(),
+        companyName: editSupplierForm.companyName.trim(),
+        phone: editSupplierForm.phone.trim(),
+        email: editSupplierForm.email.trim(),
+        address: editSupplierForm.address.trim(),
+        notes: editSupplierForm.notes.trim(),
+      });
+      onToast(language === 'bn' ? 'সাপ্লায়ার প্রোফাইল সফলভাবে আপডেট হয়েছে!' : 'Supplier profile updated successfully!', 'success');
+      setEditingSupplier(null);
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to update supplier', 'error');
+    } finally {
+      setEditSupplierSaving(false);
+    }
+  };
+
+  // Handle Delete Supplier
+  const handleDeleteSupplier = async () => {
+    if (!deletingSupplier) return;
+    setDeletingSupLoading(true);
+    try {
+      await businessService.deleteSupplier(deletingSupplier.id);
+      onToast(language === 'bn' ? 'সাপ্লায়ার রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!' : 'Supplier record deleted successfully!', 'success');
+      setDeletingSupplier(null);
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to delete supplier', 'error');
+    } finally {
+      setDeletingSupLoading(false);
+    }
+  };
+
+  // Open Edit Payment Modal
+  const openEditPaymentModal = (pay: SupplierPayment) => {
+    setEditingPayment(pay);
+    setEditPayAmount(Number(pay.paymentAmount) || 0);
+    const m = (pay.paymentMethod || 'CASH').toUpperCase();
+    setEditPayMethod(['CASH', 'BKASH', 'NAGAD', 'ROCKET', 'BANK'].includes(m) ? (m as PaymentAccountMethod) : 'CASH');
+    setEditPayDate(pay.date || new Date().toISOString().slice(0, 10));
+    setEditPayNote(pay.note || '');
+  };
+
+  // Handle Update Supplier Payment
+  const handleUpdatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPayment) return;
+    if (editPayAmount <= 0) {
+      onToast('Payment amount must be greater than zero', 'error');
+      return;
+    }
+    setEditPaySaving(true);
+    try {
+      const pId = editingPayment.paymentId || editingPayment.id || '';
+      await businessService.updateSupplierPayment(pId, {
+        paymentAmount: editPayAmount,
+        paymentMethod: editPayMethod,
+        date: editPayDate,
+        note: editPayNote.trim(),
+      });
+      onToast(language === 'bn' ? 'পেমেন্ট ভাউচার সফলভাবে আপডেট হয়েছে!' : 'Payment voucher updated successfully!', 'success');
+      setEditingPayment(null);
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to update payment', 'error');
+    } finally {
+      setEditPaySaving(false);
+    }
+  };
+
+  // Handle Delete Supplier Payment
+  const handleDeletePayment = async () => {
+    if (!deletingPayment) return;
+    setDeletingPayLoading(true);
+    try {
+      const pId = deletingPayment.paymentId || deletingPayment.id || '';
+      await businessService.deleteSupplierPayment(pId);
+      onToast(
+        language === 'bn'
+          ? 'পেমেন্ট ভাউচার মুছে ফেলা হয়েছে এবং বকেয়া পুনরায় হিসাব করা হয়েছে!'
+          : 'Payment voucher deleted and due recalculated!',
+        'success'
+      );
+      setDeletingPayment(null);
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+      onToast(err?.message || 'Failed to delete payment voucher', 'error');
+    } finally {
+      setDeletingPayLoading(false);
     }
   };
 
@@ -508,7 +661,7 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
                       </td>
 
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => openPaymentModal(s.id)}
                             className="px-2.5 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-700 hover:text-white text-emerald-800 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
@@ -524,6 +677,22 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
                             className="px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
                           >
                             Ledger
+                          </button>
+
+                          <button
+                            onClick={() => openEditSupplierModal(s)}
+                            className="p-1.5 rounded-lg border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'সাপ্লায়ার সম্পাদনা করুন' : 'Edit Supplier'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            onClick={() => setDeletingSupplier(s)}
+                            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 cursor-pointer shadow-2xs"
+                            title={language === 'bn' ? 'সাপ্লায়ার মুছে ফেলুন' : 'Delete Supplier'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -557,7 +726,8 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
                   <th className="py-3 px-3 text-right">Payment Amount</th>
                   <th className="py-3 px-3">Method & Account</th>
                   <th className="py-3 px-3 text-right">Remaining Due</th>
-                  <th className="py-3 px-4">Notes & TrxID</th>
+                  <th className="py-3 px-3">Notes & TrxID</th>
+                  <th className="py-3 px-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -583,11 +753,43 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
                     <td className="py-3 px-3 text-right font-mono text-stone-600 font-semibold">
                       {money(pay.remainingDue)}
                     </td>
-                    <td className="py-3 px-4 text-stone-500 text-[11px]">
+                    <td className="py-3 px-3 text-stone-500 text-[11px]">
                       <div>{pay.note || '-'}</div>
                       {pay.transactionId && (
                         <div className="font-mono text-[10px] text-stone-400">TrxID: {pay.transactionId}</div>
                       )}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => setViewingPayment(pay)}
+                          className="p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 text-stone-600 cursor-pointer shadow-2xs"
+                          title={language === 'bn' ? 'ভাউচার দেখুন' : 'View Voucher'}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setPrintPayment(pay)}
+                          className="p-1.5 rounded-lg border border-amber-200 bg-amber-50/50 hover:bg-amber-100 text-amber-800 cursor-pointer shadow-2xs"
+                          title={language === 'bn' ? 'ভাউচার প্রিন্ট করুন' : 'Print Voucher'}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openEditPaymentModal(pay)}
+                          className="p-1.5 rounded-lg border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-700 cursor-pointer shadow-2xs"
+                          title={language === 'bn' ? 'ভাউচার সম্পাদনা (Edit) করুন' : 'Edit Voucher'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingPayment(pay)}
+                          className="p-1.5 rounded-lg border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 cursor-pointer shadow-2xs"
+                          title={language === 'bn' ? 'ভাউচার মুছে ফেলুন' : 'Delete Voucher'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -974,6 +1176,442 @@ export const SuppliersManagement: React.FC<SuppliersManagementProps> = ({ onToas
             </form>
           </div>
         </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* EDIT SUPPLIER MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {editingSupplier && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200">
+              <h3 className="font-serif text-lg font-bold text-stone-900">
+                {language === 'bn' ? 'সাপ্লায়ার প্রোফাইল সম্পাদনা (Edit Supplier)' : 'Edit Supplier Profile'}
+              </h3>
+              <button
+                onClick={() => setEditingSupplier(null)}
+                className="p-1.5 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSupplier} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'সাপ্লায়ারের নাম *' : 'Supplier Name *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editSupplierForm.name}
+                    onChange={(e) => setEditSupplierForm({ ...editSupplierForm, name: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'কোম্পানি / মিল' : 'Company / Factory'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editSupplierForm.companyName}
+                    onChange={(e) => setEditSupplierForm({ ...editSupplierForm, companyName: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'মোবাইল নম্বর *' : 'Phone Number *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editSupplierForm.phone}
+                    onChange={(e) => setEditSupplierForm({ ...editSupplierForm, phone: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'ইমেইল' : 'Email'}
+                  </label>
+                  <input
+                    type="email"
+                    value={editSupplierForm.email}
+                    onChange={(e) => setEditSupplierForm({ ...editSupplierForm, email: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-stone-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'ঠিকানা' : 'Address'}
+                </label>
+                <input
+                  type="text"
+                  value={editSupplierForm.address}
+                  onChange={(e) => setEditSupplierForm({ ...editSupplierForm, address: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-stone-300"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'নোট' : 'Notes'}
+                </label>
+                <input
+                  type="text"
+                  value={editSupplierForm.notes}
+                  onChange={(e) => setEditSupplierForm({ ...editSupplierForm, notes: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-stone-300"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingSupplier(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSupplierSaving}
+                  className="px-5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {editSupplierSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{editSupplierSaving ? 'Saving...' : 'Update Supplier'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* DELETE SUPPLIER CONFIRMATION */}
+      {/* ------------------------------------------------------------- */}
+      {deletingSupplier && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-700 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'রেকর্ড মুছে ফেলার নিশ্চিতকরণ' : 'Delete Supplier'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-rose-700">
+                  {deletingSupplier.name} ({deletingSupplier.id})
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {language === 'bn'
+                ? 'আপনি কি নিশ্চিতভাবে এই রেকর্ডটি মুছে ফেলতে চান?'
+                : 'Are you sure you want to delete this supplier profile?'}
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deletingSupLoading}
+                onClick={() => setDeletingSupplier(null)}
+                className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingSupLoading}
+                onClick={handleDeleteSupplier}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {deletingSupLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{deletingSupLoading ? 'Deleting...' : (language === 'bn' ? 'মুছে ফেলুন' : 'Delete')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* EDIT PAYMENT VOUCHER MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {editingPayment && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-200">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'পেমেন্ট ভাউচার সম্পাদনা (Edit Payment)' : 'Edit Payment Voucher'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-blue-800">
+                  {editingPayment.paymentId || editingPayment.id} • {editingPayment.supplierName}
+                </span>
+              </div>
+              <button
+                onClick={() => setEditingPayment(null)}
+                className="p-1.5 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdatePayment} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'পরিশোধের পরিমাণ (৳) *' : 'Payment Amount (৳) *'}
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={editPayAmount}
+                  onChange={(e) => setEditPayAmount(Number(e.target.value) || 0)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300 font-mono font-bold text-sm text-emerald-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'পদ্ধতি' : 'Method'}
+                  </label>
+                  <select
+                    value={editPayMethod}
+                    onChange={(e) => setEditPayMethod(e.target.value as PaymentAccountMethod)}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-bold"
+                  >
+                    <option value="CASH">Cash in Hand</option>
+                    <option value="BKASH">bKash Send Money</option>
+                    <option value="NAGAD">Nagad</option>
+                    <option value="ROCKET">Rocket</option>
+                    <option value="BANK">Bank Account</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {language === 'bn' ? 'তারিখ *' : 'Date *'}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editPayDate}
+                    onChange={(e) => setEditPayDate(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  {language === 'bn' ? 'নোট' : 'Notes'}
+                </label>
+                <input
+                  type="text"
+                  value={editPayNote}
+                  onChange={(e) => setEditPayNote(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-stone-300"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingPayment(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editPaySaving}
+                  className="px-5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {editPaySaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{editPaySaving ? 'Saving...' : 'Update Voucher'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* DELETE PAYMENT CONFIRMATION */}
+      {/* ------------------------------------------------------------- */}
+      {deletingPayment && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-stone-200">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-700 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-stone-900">
+                  {language === 'bn' ? 'রেকর্ড মুছে ফেলার নিশ্চিতকরণ' : 'Delete Payment Voucher'}
+                </h3>
+                <span className="font-mono text-xs font-bold text-rose-700">
+                  {deletingPayment.paymentId || deletingPayment.id}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {language === 'bn'
+                ? 'আপনি কি নিশ্চিতভাবে এই রেকর্ডটি মুছে ফেলতে চান? এটি মুছে ফেললে সাপ্লায়ারের বকেয়া পুনরায় বৃদ্ধি পাবে।'
+                : 'Are you sure you want to delete this payment voucher? The supplier outstanding due will be restored.'}
+            </p>
+
+            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-stone-500">Supplier:</span>
+                <span className="font-semibold">{deletingPayment.supplierName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500">Payment Amount:</span>
+                <span className="font-mono font-bold text-emerald-800">{money(deletingPayment.paymentAmount)}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={deletingPayLoading}
+                onClick={() => setDeletingPayment(null)}
+                className="px-4 py-2 rounded-xl border border-stone-300 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingPayLoading}
+                onClick={handleDeletePayment}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {deletingPayLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{deletingPayLoading ? 'Deleting...' : (language === 'bn' ? 'মুছে ফেলুন' : 'Delete')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* VIEW & PRINT PAYMENT VOUCHER */}
+      {/* ------------------------------------------------------------- */}
+      {(viewingPayment || printPayment) && (
+        (() => {
+          const voucher = viewingPayment || printPayment!;
+          return (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-stone-200 my-8">
+                <div className="flex items-center justify-between pb-3 border-b border-stone-200 no-print">
+                  <span className="text-xs font-bold text-stone-500 uppercase tracking-wider">
+                    Supplier Payment Voucher
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => printSection(`Voucher_${voucher.paymentId}`, 'supplier-voucher-print')}
+                      className="px-4 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Print Voucher</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setViewingPayment(null);
+                        setPrintPayment(null);
+                      }}
+                      className="p-1 rounded-full hover:bg-stone-100 text-stone-500 cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Printable Area */}
+                <div id="supplier-voucher-print" className="p-6 bg-white border border-stone-300 rounded-2xl space-y-5 text-stone-900 font-sans">
+                  <div className="text-center border-b-2 border-stone-900 pb-3">
+                    <h1 className="font-serif text-2xl font-black tracking-wide text-stone-950 uppercase">
+                      MINARUL FASHION HOUSE
+                    </h1>
+                    <p className="text-[11px] text-stone-600 font-medium">
+                      Premium Fashion & Quality Clothing • Chuadanga, Bangladesh
+                    </p>
+                    <div className="mt-2 inline-block px-3 py-1 rounded bg-stone-900 text-white text-[10px] font-bold uppercase tracking-widest">
+                      SUPPLIER PAYMENT VOUCHER / মহাজন পরিশোধ ভাউচার
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 text-xs gap-3">
+                    <div>
+                      <span className="text-stone-500 block text-[10px] uppercase font-bold">Paid To (Supplier):</span>
+                      <div className="font-bold text-stone-900 text-sm">{voucher.supplierName}</div>
+                      <div className="text-stone-600 text-[11px]">Supplier ID: {voucher.supplierId}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-stone-500 text-[10px] uppercase font-bold">Voucher No:</div>
+                      <div className="font-mono font-black text-sm text-stone-950">{voucher.paymentId}</div>
+                      <div className="text-stone-600 text-[11px]">Date: {voucher.date}</div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 text-xs space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-stone-600">Previous Outstanding Due:</span>
+                      <span className="font-mono font-bold">{money(voucher.currentDue || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-800 text-sm font-bold border-y border-stone-200 py-1.5">
+                      <span>Amount Paid (পরিশোধ):</span>
+                      <span className="font-mono text-base">{money(voucher.paymentAmount)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-800 font-bold">
+                      <span>Remaining Balance Due:</span>
+                      <span className="font-mono">{money(voucher.remainingDue || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-stone-500 text-[11px] pt-1">
+                      <span>Payment Account & Method:</span>
+                      <span className="font-bold uppercase">{voucher.paymentMethod} {voucher.paymentAccount ? `(${voucher.paymentAccount})` : ''}</span>
+                    </div>
+                    {voucher.transactionId && (
+                      <div className="flex justify-between text-stone-500 text-[11px]">
+                        <span>Transaction Reference / TrxID:</span>
+                        <span className="font-mono font-bold">{voucher.transactionId}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {voucher.note && (
+                    <div className="text-[11px] text-stone-600 italic">
+                      Remarks: {voucher.note}
+                    </div>
+                  )}
+
+                  <div className="pt-8 grid grid-cols-2 text-center text-xs text-stone-600">
+                    <div>
+                      <div className="border-t border-stone-400 w-36 mx-auto pt-1">Received By (Supplier)</div>
+                    </div>
+                    <div>
+                      <div className="border-t border-stone-400 w-36 mx-auto pt-1 font-bold">Authorized Signatory</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()
       )}
     </div>
   );

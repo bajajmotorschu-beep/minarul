@@ -68,7 +68,6 @@ import { app, db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
 import { businessService } from '../../services/businessService';
-import { BusinessManagement } from './BusinessManagement';
 import { StockManagement } from './StockManagement';
 import { PurchasesManagement } from './PurchasesManagement';
 import { SuppliersManagement } from './SuppliersManagement';
@@ -421,7 +420,6 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
     | 'reports'
     | 'orders'
     | 'products'
-    | 'business'
     | 'slides'
     | 'coupons'
     | 'reviews'
@@ -1555,18 +1553,6 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('business')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'business'
-                ? 'border-amber-700 text-amber-800'
-                : 'border-transparent text-stone-500 hover:text-stone-900'
-            }`}
-          >
-            <CircleDollarSign className="w-3.5 h-3.5 text-amber-700" />
-            <span>{language === 'bn' ? 'কুইক বিজনেস' : 'Quick Business'}</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('slides')}
             className={`pb-3 border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'slides'
@@ -1743,7 +1729,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
                 <h4 className="font-bold text-stone-900">Active Payment Config</h4>
                 <div className="space-y-1.5 text-stone-600">
                   <div className="flex justify-between">
-                    <span>bKash Merchant:</span>
+                    <span>{language === 'bn' ? 'বিকাশ Send Money:' : 'bKash Send Money:'}</span>
                     <strong className="font-mono text-pink-700">{settings.bkashMerchantNumber}</strong>
                   </div>
                   <div className="flex justify-between">
@@ -1820,10 +1806,6 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
             orders={orders}
             onToast={onToast}
           />
-        )}
-
-        {activeTab === 'business' && (
-          <BusinessManagement products={products} onToast={onToast} />
         )}
 
         {activeTab === 'products' && (
@@ -2654,7 +2636,7 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="block font-bold text-pink-700 mb-1">
-                      bKash (বিকাশ) Merchant Number *
+                      {language === 'bn' ? 'বিকাশ Send Money নম্বর *' : 'bKash Send Money Number *'}
                     </label>
                     <input
                       type="text"
