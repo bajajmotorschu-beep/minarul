@@ -9,6 +9,7 @@ import {
   Calendar, 
   Truck, 
   ArrowRight,
+  ArrowLeft,
   ShieldCheck 
 } from 'lucide-react';
 import { Order } from '../../types';
@@ -16,12 +17,16 @@ import { useLanguage } from '../../context/LanguageContext';
 
 interface OrderReceiptProps {
   order: Order;
+  fromAdmin?: boolean;
+  onBackToAdminOrders?: () => void;
   onContinueShopping: () => void;
   onTrackOrder: (orderId: string) => void;
 }
 
 export const OrderReceipt: React.FC<OrderReceiptProps> = ({
   order,
+  fromAdmin,
+  onBackToAdminOrders,
   onContinueShopping,
   onTrackOrder,
 }) => {
@@ -43,55 +48,117 @@ export const OrderReceipt: React.FC<OrderReceiptProps> = ({
   );
 
   return (
-    <div className="bg-stone-100/60 py-10 min-h-screen">
+    <div className="bg-stone-100/60 py-8 min-h-screen">
       <div className="max-w-3xl mx-auto px-4 sm:px-6">
+        {/* Navigation Bar / Return to Admin - Strictly visible on screen, hidden on print */}
+        {onBackToAdminOrders && (
+          <div className="no-print print:hidden mb-5 flex items-center justify-between bg-stone-900 text-stone-100 px-4 sm:px-6 py-3.5 rounded-2xl shadow-md border border-stone-800">
+            <button
+              onClick={onBackToAdminOrders}
+              className="no-print print:hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-xs sm:text-sm font-bold shadow-sm transition-all cursor-pointer border border-amber-600 active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>
+                {language === 'bn' ? '← অর্ডার ম্যানেজমেন্টে ফিরে যান' : '← Back to Order Management'}
+              </span>
+            </button>
+
+            <div className="text-right">
+              <span className="text-xs text-amber-400 font-semibold hidden sm:inline-block">
+                Admin Panel • {order.paymentMethod === 'cod' ? 'Memo' : 'Invoice'} #{order.id}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Success Header Notice */}
-        <div className="bg-white rounded-3xl border border-stone-200 p-6 sm:p-8 text-center space-y-4 shadow-sm mb-6 print:hidden">
+        <div className="bg-white rounded-3xl border border-stone-200 p-6 sm:p-8 text-center space-y-4 shadow-sm mb-6 no-print print:hidden">
           <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
             <CheckCircle2 className="w-10 h-10" />
           </div>
           <div>
             <h1 className="font-serif text-2xl sm:text-3xl font-bold text-stone-900">
-              {t.orderSuccessTitle}
+              {fromAdmin 
+                ? (language === 'bn' ? 'অফিসিয়াল ইনভয়েস ও মেমো ভিউ' : 'Official Invoice & Memo View')
+                : t.orderSuccessTitle}
             </h1>
             <p className="text-xs sm:text-sm text-stone-600 max-w-md mx-auto mt-1 leading-relaxed">
-              {t.orderSuccessSubtitle}
+              {fromAdmin
+                ? (language === 'bn' ? 'অর্ডারের বিবরণ ও চালান প্রিন্ট করার জন্য প্রস্তুত।' : 'Order details ready for customer dispatch and printing.')
+                : t.orderSuccessSubtitle}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {/* Primary Back Button for Admin */}
+            {onBackToAdminOrders && (
+              <button
+                onClick={onBackToAdminOrders}
+                className="no-print print:hidden px-5 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer active:scale-95"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>
+                  {language === 'bn' ? '← অর্ডার ম্যানেজমেন্টে ফিরে যান' : '← Back to Order Management'}
+                </span>
+              </button>
+            )}
+
             <button
               onClick={handlePrint}
-              className="px-5 py-2.5 rounded-xl border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+              className="no-print print:hidden px-5 py-2.5 rounded-xl border border-stone-300 hover:bg-stone-50 text-stone-800 text-xs sm:text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
             >
               <Printer className="w-4 h-4 text-amber-700" />
               <span>
                 {order.paymentMethod === 'cod'
-                  ? 'Print Memo'
+                  ? 'Print Memo (মেমো প্রিন্ট)'
                   : language === 'bn' ? 'Print Invoice (ইনভয়েস প্রিন্ট)' : 'Print Invoice'}
               </span>
             </button>
 
-            <button
-              onClick={() => onTrackOrder(order.id)}
-              className="px-5 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-colors"
-            >
-              <Truck className="w-4 h-4" />
-              <span>{t.trackYourOrder}</span>
-            </button>
+            {!fromAdmin && (
+              <>
+                <button
+                  onClick={() => onTrackOrder(order.id)}
+                  className="no-print print:hidden px-5 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-colors"
+                >
+                  <Truck className="w-4 h-4" />
+                  <span>{t.trackYourOrder}</span>
+                </button>
 
-            <button
-              onClick={onContinueShopping}
-              className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold flex items-center gap-2 transition-colors"
-            >
-              <ShoppingBag className="w-4 h-4" />
-              <span>{t.continueShopping}</span>
-            </button>
+                <button
+                  onClick={onContinueShopping}
+                  className="no-print print:hidden px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs sm:text-sm font-bold flex items-center gap-2 transition-colors"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>{t.continueShopping}</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Printable Official Invoice Card */}
         <div className="bg-white rounded-3xl border border-stone-200 p-6 sm:p-10 shadow-sm space-y-8 print:border-none print:shadow-none print:p-0">
+          {onBackToAdminOrders && (
+            <div className="no-print print:hidden flex items-center justify-between pb-3 border-b border-stone-100 -mt-2">
+              <button
+                onClick={onBackToAdminOrders}
+                className="no-print print:hidden inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-3.5 py-1.5 rounded-lg border border-amber-200 transition-colors cursor-pointer active:scale-95"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>{language === 'bn' ? '← অর্ডার ম্যানেজমেন্টে ফিরে যান' : '← Back to Order Management'}</span>
+              </button>
+
+              <button
+                onClick={handlePrint}
+                className="no-print print:hidden inline-flex items-center gap-1.5 text-xs font-bold text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 px-3.5 py-1.5 rounded-lg border border-stone-200 transition-colors cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-700" />
+                <span>{language === 'bn' ? 'প্রিন্ট করুন' : 'Print'}</span>
+              </button>
+            </div>
+          )}
+
           {/* Invoice Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b border-stone-200 gap-4">
             <div className="flex items-center gap-3">

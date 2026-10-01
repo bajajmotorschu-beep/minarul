@@ -49,7 +49,7 @@ import { TrackOrderView } from './components/tracking/TrackOrderView';
 
 // Account & Admin
 import { CustomerDashboard } from './components/account/CustomerDashboard';
-import { AdminDashboard } from './components/admin/AdminDashboard';
+import { AdminDashboard, AdminTab } from './components/admin/AdminDashboard';
 import { StaticPages } from './components/info/StaticPages';
 
 const MainApp: React.FC = () => {
@@ -61,6 +61,8 @@ const MainApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>('home');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [accountSubTab, setAccountSubTab] = useState<'orders' | 'profile' | 'wishlist'>('orders');
+  const [adminSubTab, setAdminSubTab] = useState<AdminTab>('overview');
+  const [invoiceSource, setInvoiceSource] = useState<'admin' | 'account' | 'checkout' | 'track' | null>(null);
 
   // Active Order for confirmation receipt
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
@@ -109,13 +111,6 @@ const MainApp: React.FC = () => {
     window.addEventListener('mfh:navigate', handleNavEvent);
     return () => window.removeEventListener('mfh:navigate', handleNavEvent);
   }, []);
-
-  // Enforce Admin View Security: If user is logged in with customer role, redirect to Customer Dashboard
-  useEffect(() => {
-    if (!isLoadingAuth && currentView === 'admin' && user && user.role === 'customer') {
-      setCurrentView('account');
-    }
-  }, [currentView, user, isLoadingAuth]);
 
   // Support URL routing for products (e.g. /product/:id, ?productId=..., ?product=...)
   useEffect(() => {
@@ -524,6 +519,7 @@ const MainApp: React.FC = () => {
             onBackToShop={() => handleNavigate('shop')}
             onOrderSuccess={(order) => {
               setActiveOrder(order);
+              setInvoiceSource('checkout');
               setCurrentView('receipt');
             }}
             onToast={addToast}
@@ -534,6 +530,11 @@ const MainApp: React.FC = () => {
         {currentView === 'receipt' && activeOrder && (
           <OrderReceipt
             order={activeOrder}
+            fromAdmin={invoiceSource === 'admin' || isAdmin}
+            onBackToAdminOrders={() => {
+              setAdminSubTab('orders');
+              setCurrentView('admin');
+            }}
             onContinueShopping={() => handleNavigate('shop')}
             onTrackOrder={(orderId) => {
               setTrackingOrderId(orderId);
@@ -548,6 +549,7 @@ const MainApp: React.FC = () => {
             initialOrderId={trackingOrderId}
             onViewInvoice={(ord) => {
               setActiveOrder(ord);
+              setInvoiceSource('track');
               setCurrentView('receipt');
             }}
             onShopNow={() => handleNavigate('shop')}
@@ -560,6 +562,7 @@ const MainApp: React.FC = () => {
             initialTab={accountSubTab}
             onViewInvoice={(ord) => {
               setActiveOrder(ord);
+              setInvoiceSource('account');
               setCurrentView('receipt');
             }}
             onTrackOrder={(orderId) => {
@@ -576,8 +579,11 @@ const MainApp: React.FC = () => {
         {/* VIEW 7: ADMIN PORTAL */}
         {currentView === 'admin' && (
           <AdminDashboard
+            initialTab={adminSubTab}
+            onTabChange={(tab) => setAdminSubTab(tab)}
             onViewInvoice={(ord) => {
               setActiveOrder(ord);
+              setInvoiceSource('admin');
               setCurrentView('receipt');
             }}
             onToast={addToast}

@@ -11,7 +11,7 @@
     background-color: white !important;
     color: black !important;
   }
-  header, footer, nav, .print\:hidden {
+  header, footer, nav, .print\:hidden, .no-print {
     display: none !important;
   }
 }

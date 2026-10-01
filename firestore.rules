@@ -12,7 +12,7 @@ service cloud.firestore {
     }
 
     // Hardcoded / bootstrapped admin emails for initial setup and guaranteed access
-    function isHardcodedAdminEmail() {
+    function isAuthorizedAdminAccount() {
       return isSignedIn()
         && request.auth.token.email != null
         && (
@@ -21,17 +21,12 @@ service cloud.firestore {
         );
     }
 
-    // Admin authorization check:
-    // Strictly determined from Firebase Authentication + Firestore users/{uid}.data.role == 'admin',
-    // along with bootstrapped admin email verification.
+    // Dynamic Admin authorization check:
+    // Strictly determined from Firebase Authentication + Firestore users/{request.auth.uid}.data.role == 'admin'
     function isAdmin() {
-      return isSignedIn() && (
-        (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
-        )
-        || isHardcodedAdminEmail()
-      );
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
     // Default deny catch-all
@@ -46,9 +41,13 @@ service cloud.firestore {
       allow list: if isAdmin();
 
       // Creation: customer can create their own profile with role == 'customer'
-      // Existing admin or bootstrapped admin can create profiles (including admin role)
+      // Authorized store administrator can create their own document with role == 'admin'
+      // Existing admin can create any user profile
       allow create: if isSignedIn() && (
-        (isOwner(userId) && request.resource.data.role == 'customer') ||
+        (isOwner(userId) && (
+          request.resource.data.role == 'customer' ||
+          (request.resource.data.role == 'admin' && isAuthorizedAdminAccount())
+        )) ||
         isAdmin()
       );
 
@@ -56,8 +55,8 @@ service cloud.firestore {
       // Existing admin can update any user profile
       allow update: if isSignedIn() && (
         (isOwner(userId) && (
-          !('role' in request.resource.data) || 
-          request.resource.data.role == resource.data.role
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) ||
+          (request.resource.data.role == 'admin' && isAuthorizedAdminAccount())
         )) ||
         isAdmin()
       );

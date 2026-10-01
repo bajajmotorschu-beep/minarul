@@ -46,12 +46,12 @@ export function logFirestoreError(
   const errorMessage = error instanceof Error ? error.message : String(error);
 
   console.error(
-    `[Firestore Permission Error]\n` +
+    `Firestore Permission Error\n\n` +
     `Collection: ${collectionName}\n` +
     `Operation: ${operation}\n` +
-    `User UID: ${currentUid}\n` +
-    `User Email: ${currentEmail}\n` +
-    `User Role: ${resolvedRole}\n` +
+    `UID: ${currentUid}\n` +
+    `Email: ${currentEmail}\n` +
+    `Role: ${resolvedRole}\n` +
     `Error Code: ${errorCode}\n` +
     `Message: ${errorMessage}`
   );

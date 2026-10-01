@@ -252,8 +252,13 @@ export const businessService = {
 
     await runTransaction(db, async (tx) => {
       const expRef = doc(db, 'expenses', id);
+      const txId = `CTX-${id}`;
+      const ctxRef = doc(db, 'cashTransactions', txId);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const expSnap = await tx.get(expRef);
       if (!expSnap.exists()) throw new Error('EXPENSE_NOT_FOUND');
+      const ctxSnap = await tx.get(ctxRef);
 
       const updateData: any = {
         ...input,
@@ -264,10 +269,7 @@ export const businessService = {
 
       tx.update(expRef, clean(updateData));
 
-      // Also update linked cash transaction
-      const txId = `CTX-${id}`;
-      const ctxRef = doc(db, 'cashTransactions', txId);
-      const ctxSnap = await tx.get(ctxRef);
+      // Also update linked cash transaction if it exists
       if (ctxSnap.exists()) {
         const ctxUpdate: any = {
           updatedAt: serverTimestamp(),
@@ -286,15 +288,17 @@ export const businessService = {
     if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
     await runTransaction(db, async (tx) => {
       const expRef = doc(db, 'expenses', id);
+      const txId = `CTX-${id}`;
+      const ctxRef = doc(db, 'cashTransactions', txId);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const expSnap = await tx.get(expRef);
       if (!expSnap.exists()) return;
+      const ctxSnap = await tx.get(ctxRef);
 
       tx.delete(expRef);
 
       // Delete linked cash transaction
-      const txId = `CTX-${id}`;
-      const ctxRef = doc(db, 'cashTransactions', txId);
-      const ctxSnap = await tx.get(ctxRef);
       if (ctxSnap.exists()) {
         tx.delete(ctxRef);
       }
@@ -430,7 +434,13 @@ export const businessService = {
       const diff = newAmount - oldAmount;
 
       const supplierRef = doc(db, 'suppliers', oldPay.supplierId);
+      const ctxId = `CTX-${paymentId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const sSnap = await tx.get(supplierRef);
+      const ctxSnap = await tx.get(ctxRef);
+
       if (sSnap.exists()) {
         const sData = sSnap.data();
         const curDue = Number(sData.currentDue ?? sData.openingDue ?? 0);
@@ -450,9 +460,6 @@ export const businessService = {
       }));
 
       // Update linked cash transaction
-      const ctxId = `CTX-${paymentId}`;
-      const ctxRef = doc(db, 'cashTransactions', ctxId);
-      const ctxSnap = await tx.get(ctxRef);
       if (ctxSnap.exists()) {
         tx.update(ctxRef, clean({
           amount: newAmount,
@@ -473,9 +480,15 @@ export const businessService = {
       const oldPay = paySnap.data();
       const oldAmount = Number(oldPay.paymentAmount) || 0;
 
-      // Restore supplier due (undoing the payment)
       const supplierRef = doc(db, 'suppliers', oldPay.supplierId);
+      const ctxId = `CTX-${paymentId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const sSnap = await tx.get(supplierRef);
+      const ctxSnap = await tx.get(ctxRef);
+
+      // Restore supplier due (undoing the payment)
       if (sSnap.exists()) {
         const sData = sSnap.data();
         const curDue = Number(sData.currentDue ?? sData.openingDue ?? 0);
@@ -489,9 +502,6 @@ export const businessService = {
       tx.delete(payRef);
 
       // Delete linked cash transaction
-      const ctxId = `CTX-${paymentId}`;
-      const ctxRef = doc(db, 'cashTransactions', ctxId);
-      const ctxSnap = await tx.get(ctxRef);
       if (ctxSnap.exists()) {
         tx.delete(ctxRef);
       }
@@ -639,22 +649,41 @@ export const businessService = {
       if (!purSnap.exists()) throw new Error('PURCHASE_NOT_FOUND');
       const oldPur = purSnap.data() as Purchase;
 
+      const itemsToUpdate = (input.items && Array.isArray(input.items)) ? input.items : [];
+      const productDocRefs = itemsToUpdate.map((it) => doc(db, 'products', it.productId));
+
+      const supplierRef = (input.dueAmount !== undefined && oldPur.supplierId)
+        ? doc(db, 'suppliers', oldPur.supplierId)
+        : null;
+
+      const spayId = `SPAY-${purchaseId}`;
+      const spayRef = input.paidAmount !== undefined ? doc(db, 'supplierPayments', spayId) : null;
+      const ctxId = `CTX-${spayId}`;
+      const ctxRef = input.paidAmount !== undefined ? doc(db, 'cashTransactions', ctxId) : null;
+
+      // ALL READS MUST PRECEDE ALL WRITES
+      const productSnaps = await Promise.all(productDocRefs.map((ref) => tx.get(ref)));
+      const supplierSnap = supplierRef ? await tx.get(supplierRef) : null;
+      const spaySnap = spayRef ? await tx.get(spayRef) : null;
+      const ctxSnap = ctxRef ? await tx.get(ctxRef) : null;
+
       // 1. Stock adjustments for modified item quantities
-      if (input.items && Array.isArray(input.items)) {
+      if (itemsToUpdate.length > 0) {
         const oldItemsMap = new Map<string, number>();
         for (const item of oldPur.items || []) {
           oldItemsMap.set(item.productId, Number(item.quantity) || 0);
         }
 
-        for (const newItem of input.items) {
+        for (let i = 0; i < itemsToUpdate.length; i++) {
+          const newItem = itemsToUpdate[i];
           const oldQty = oldItemsMap.get(newItem.productId) || 0;
           const newQty = Number(newItem.quantity) || 0;
           const delta = newQty - oldQty;
 
           if (delta !== 0) {
-            const pRef = doc(db, 'products', newItem.productId);
-            const pSnap = await tx.get(pRef);
-            if (pSnap.exists()) {
+            const pSnap = productSnaps[i];
+            const pRef = productDocRefs[i];
+            if (pSnap && pSnap.exists()) {
               const pData = pSnap.data();
               const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
               const updatedStock = Math.max(0, curStock + delta);
@@ -692,20 +721,16 @@ export const businessService = {
       }
 
       // 2. Adjust supplier due if dueAmount changed
-      if (input.dueAmount !== undefined && oldPur.supplierId) {
+      if (supplierRef && supplierSnap && supplierSnap.exists() && input.dueAmount !== undefined) {
         const oldDue = Number(oldPur.dueAmount) || 0;
         const newDue = Number(input.dueAmount) || 0;
         const dueDiff = newDue - oldDue;
         if (dueDiff !== 0) {
-          const sRef = doc(db, 'suppliers', oldPur.supplierId);
-          const sSnap = await tx.get(sRef);
-          if (sSnap.exists()) {
-            const curSupplierDue = Number(sSnap.data().currentDue ?? sSnap.data().openingDue ?? 0);
-            tx.update(sRef, {
-              currentDue: Math.max(0, curSupplierDue + dueDiff),
-              updatedAt: serverTimestamp(),
-            });
-          }
+          const curSupplierDue = Number(supplierSnap.data().currentDue ?? supplierSnap.data().openingDue ?? 0);
+          tx.update(supplierRef, {
+            currentDue: Math.max(0, curSupplierDue + dueDiff),
+            updatedAt: serverTimestamp(),
+          });
         }
       }
 
@@ -716,28 +741,20 @@ export const businessService = {
       }));
 
       // 4. Update downpayment if paidAmount changed
-      if (input.paidAmount !== undefined) {
-        const spayId = `SPAY-${purchaseId}`;
-        const spayRef = doc(db, 'supplierPayments', spayId);
-        const spaySnap = await tx.get(spayRef);
-        if (spaySnap.exists()) {
-          tx.update(spayRef, clean({
-            paymentAmount: Number(input.paidAmount) || 0,
-            paymentMethod: input.paymentMethod || oldPur.paymentMethod,
-            updatedAt: serverTimestamp(),
-          }));
-        }
+      if (spaySnap && spaySnap.exists() && spayRef) {
+        tx.update(spayRef, clean({
+          paymentAmount: Number(input.paidAmount) || 0,
+          paymentMethod: input.paymentMethod || oldPur.paymentMethod,
+          updatedAt: serverTimestamp(),
+        }));
+      }
 
-        const ctxId = `CTX-${spayId}`;
-        const ctxRef = doc(db, 'cashTransactions', ctxId);
-        const ctxSnap = await tx.get(ctxRef);
-        if (ctxSnap.exists()) {
-          tx.update(ctxRef, clean({
-            amount: Number(input.paidAmount) || 0,
-            paymentMethod: input.paymentMethod || oldPur.paymentMethod,
-            updatedAt: serverTimestamp(),
-          }));
-        }
+      if (ctxSnap && ctxSnap.exists() && ctxRef) {
+        tx.update(ctxRef, clean({
+          amount: Number(input.paidAmount) || 0,
+          paymentMethod: input.paymentMethod || oldPur.paymentMethod,
+          updatedAt: serverTimestamp(),
+        }));
       }
     });
   },
@@ -751,11 +768,34 @@ export const businessService = {
       if (!purSnap.exists()) return;
       const pur = purSnap.data() as Purchase;
 
+      const items = pur.items || [];
+      const productDocRefs = items.map((item) => doc(db, 'products', item.productId));
+      const movementDocRefs = items.map((item) => doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}`));
+
+      const dueAmount = Number(pur.dueAmount) || 0;
+      const supplierRef = (pur.supplierId && dueAmount > 0) ? doc(db, 'suppliers', pur.supplierId) : null;
+
+      const spayId = `SPAY-${purchaseId}`;
+      const spayRef = doc(db, 'supplierPayments', spayId);
+      const ctxId = `CTX-${spayId}`;
+      const ctxRef = doc(db, 'cashTransactions', ctxId);
+
+      // ALL READS MUST PRECEDE ALL WRITES
+      const productSnaps = await Promise.all(productDocRefs.map((ref) => tx.get(ref)));
+      const movementSnaps = await Promise.all(movementDocRefs.map((ref) => tx.get(ref)));
+      const supplierSnap = supplierRef ? await tx.get(supplierRef) : null;
+      const spaySnap = await tx.get(spayRef);
+      const ctxSnap = await tx.get(ctxRef);
+
       // 1. Rollback stock for all items
-      for (const item of pur.items || []) {
-        const pRef = doc(db, 'products', item.productId);
-        const pSnap = await tx.get(pRef);
-        if (pSnap.exists()) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const pSnap = productSnaps[i];
+        const pRef = productDocRefs[i];
+        const mSnap = movementSnaps[i];
+        const mRef = movementDocRefs[i];
+
+        if (pSnap && pSnap.exists()) {
           const pData = pSnap.data();
           const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
           const rollbackStock = Math.max(0, curStock - (Number(item.quantity) || 0));
@@ -765,10 +805,8 @@ export const businessService = {
             updatedAt: serverTimestamp(),
           });
 
-          // Delete purchase movement
-          const mRef = doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}`);
-          const mSnap = await tx.get(mRef);
-          if (mSnap.exists()) {
+          // Delete purchase movement if it exists
+          if (mSnap && mSnap.exists()) {
             tx.delete(mRef);
           }
 
@@ -798,30 +836,19 @@ export const businessService = {
       }
 
       // 2. Rollback supplier due
-      const dueAmount = Number(pur.dueAmount) || 0;
-      if (pur.supplierId && dueAmount > 0) {
-        const sRef = doc(db, 'suppliers', pur.supplierId);
-        const sSnap = await tx.get(sRef);
-        if (sSnap.exists()) {
-          const curDue = Number(sSnap.data().currentDue ?? sSnap.data().openingDue ?? 0);
-          tx.update(sRef, {
-            currentDue: Math.max(0, curDue - dueAmount),
-            updatedAt: serverTimestamp(),
-          });
-        }
+      if (supplierRef && supplierSnap && supplierSnap.exists() && dueAmount > 0) {
+        const curDue = Number(supplierSnap.data().currentDue ?? supplierSnap.data().openingDue ?? 0);
+        tx.update(supplierRef, {
+          currentDue: Math.max(0, curDue - dueAmount),
+          updatedAt: serverTimestamp(),
+        });
       }
 
       // 3. Rollback paid amount if paid
-      const spayId = `SPAY-${purchaseId}`;
-      const spayRef = doc(db, 'supplierPayments', spayId);
-      const spaySnap = await tx.get(spayRef);
       if (spaySnap.exists()) {
         tx.delete(spayRef);
       }
 
-      const ctxId = `CTX-${spayId}`;
-      const ctxRef = doc(db, 'cashTransactions', ctxId);
-      const ctxSnap = await tx.get(ctxRef);
       if (ctxSnap.exists()) {
         tx.delete(ctxRef);
       }
@@ -933,8 +960,13 @@ export const businessService = {
       const oldAdj = adjSnap.data() as StockAdjustment;
 
       const pRef = doc(db, 'products', oldAdj.productId);
+      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const pSnap = await tx.get(pRef);
       if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
+      const stmSnap = await tx.get(stmRef);
+
       const pData = pSnap.data();
       const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
 
@@ -963,9 +995,7 @@ export const businessService = {
         updatedAt: serverTimestamp(),
       }));
 
-      // Update movement
-      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
-      const stmSnap = await tx.get(stmRef);
+      // Update movement if it exists
       if (stmSnap.exists()) {
         tx.update(stmRef, clean({
           quantity: newDelta,
@@ -988,7 +1018,12 @@ export const businessService = {
       const adj = adjSnap.data() as StockAdjustment;
 
       const pRef = doc(db, 'products', adj.productId);
+      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+
+      // ALL READS MUST PRECEDE ALL WRITES
       const pSnap = await tx.get(pRef);
+      const stmSnap = await tx.get(stmRef);
+
       if (pSnap.exists()) {
         const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
         const rollbackStock = Math.max(0, curStock - (Number(adj.quantity) || 0));
@@ -1001,8 +1036,6 @@ export const businessService = {
 
       tx.delete(adjRef);
 
-      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
-      const stmSnap = await tx.get(stmRef);
       if (stmSnap.exists()) {
         tx.delete(stmRef);
       }
@@ -1164,11 +1197,25 @@ export const businessService = {
       if (!saleSnap.exists()) return;
       const sale = saleSnap.data() as Sale;
 
+      const items = sale.items || [];
+      const productDocRefs = items.map((item) => doc(db, 'products', item.productId));
+      const movementDocRefs = items.map((item) => doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}`));
+      const ctxRef = doc(db, 'cashTransactions', `CTX-SALE-${sale.orderId}`);
+
+      // ALL READS MUST PRECEDE ALL WRITES
+      const productSnaps = await Promise.all(productDocRefs.map((ref) => tx.get(ref)));
+      const movementSnaps = await Promise.all(movementDocRefs.map((ref) => tx.get(ref)));
+      const ctxSnap = await tx.get(ctxRef);
+
       // 1. Restore stock
-      for (const item of sale.items || []) {
-        const pRef = doc(db, 'products', item.productId);
-        const pSnap = await tx.get(pRef);
-        if (pSnap.exists()) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const pSnap = productSnaps[i];
+        const pRef = productDocRefs[i];
+        const mSnap = movementSnaps[i];
+        const mRef = movementDocRefs[i];
+
+        if (pSnap && pSnap.exists()) {
           const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
           const restoredStock = curStock + (Number(item.quantity) || 0);
           tx.update(pRef, {
@@ -1178,17 +1225,13 @@ export const businessService = {
           });
 
           // Delete sale stock movement
-          const mRef = doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}`);
-          const mSnap = await tx.get(mRef);
-          if (mSnap.exists()) {
+          if (mSnap && mSnap.exists()) {
             tx.delete(mRef);
           }
         }
       }
 
       // 2. Delete linked cash transaction if any
-      const ctxRef = doc(db, 'cashTransactions', `CTX-SALE-${sale.orderId}`);
-      const ctxSnap = await tx.get(ctxRef);
       if (ctxSnap.exists()) {
         tx.delete(ctxRef);
       }

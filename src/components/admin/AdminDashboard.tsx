@@ -77,7 +77,25 @@ import { SalesManagement } from './SalesManagement';
 import { AccountsManagement } from './AccountsManagement';
 import { ReportsManagement } from './ReportsManagement';
 
+export type AdminTab =
+  | 'overview'
+  | 'stock'
+  | 'purchases'
+  | 'suppliers'
+  | 'sales'
+  | 'accounts'
+  | 'reports'
+  | 'orders'
+  | 'products'
+  | 'slides'
+  | 'coupons'
+  | 'reviews'
+  | 'settings'
+  | 'users';
+
 interface AdminDashboardProps {
+  initialTab?: AdminTab;
+  onTabChange?: (tab: AdminTab) => void;
   onViewInvoice: (order: Order) => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -440,6 +458,8 @@ export const AdminLoginScreen: React.FC<{
 };
 
 const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
+  initialTab = 'overview',
+  onTabChange,
   onViewInvoice,
   onToast,
 }) => {
@@ -447,22 +467,17 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
   const { user } = useAuth();
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'stock'
-    | 'purchases'
-    | 'suppliers'
-    | 'sales'
-    | 'accounts'
-    | 'reports'
-    | 'orders'
-    | 'products'
-    | 'slides'
-    | 'coupons'
-    | 'reviews'
-    | 'settings'
-    | 'users'
-  >('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || 'overview');
+
+  useEffect(() => {
+    if (initialTab && initialTab !== activeTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    onTabChange?.(activeTab);
+  }, [activeTab, onTabChange]);
 
   // Reactive Data
   const [orders, setOrders] = useState<Order[]>(() => storageService.getOrders());
@@ -3827,11 +3842,125 @@ const AdminDashboardMain: React.FC<AdminDashboardProps> = ({
 };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
-  const { isAdmin } = useAuth();
+  const { user, firebaseUser, isAdmin, isLoadingAuth, logout } = useAuth();
+  const [isConfiguringAdminDoc, setIsConfiguringAdminDoc] = useState(false);
+  const [configError, setConfigError] = useState('');
 
-  if (!isAdmin) {
+  // 1. Prevent race condition during page refresh or auth verification
+  if (isLoadingAuth) {
+    return (
+      <div className="min-h-screen bg-stone-900 text-stone-100 flex items-center justify-center p-4">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="w-12 h-12 border-4 border-amber-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div>
+            <h2 className="text-base font-bold text-stone-100">অ্যাডমিন রোল ও পারমিশন লোড হচ্ছে...</h2>
+            <p className="text-xs text-stone-400 mt-1">Verifying Firestore admin role from users/{'{uid}'}...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Not logged in to Firebase Authentication
+  if (!firebaseUser) {
     return <AdminLoginScreen onToast={props.onToast} />;
   }
 
+  // 3. Logged in, but Firestore users/{uid} document does not exist
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-stone-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5 border border-stone-200">
+          <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-800 mx-auto flex items-center justify-center font-bold text-2xl">
+            ⚠️
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-bold text-stone-900 font-serif">Admin Profile Not Found</h2>
+            <p className="text-xs text-stone-600 leading-relaxed font-medium">
+              Admin profile not found. Please configure the admin user document in Firestore.
+            </p>
+            <div className="text-[11px] text-left text-stone-600 font-mono bg-stone-50 border border-stone-200 p-3 rounded-xl space-y-1">
+              <p><strong className="text-stone-900 font-sans">UID:</strong> {firebaseUser.uid}</p>
+              <p><strong className="text-stone-900 font-sans">Email:</strong> {firebaseUser.email || '(none)'}</p>
+              <p><strong className="text-stone-900 font-sans">Target:</strong> users/{firebaseUser.uid}</p>
+            </div>
+            {configError && (
+              <p className="text-xs text-rose-600 font-medium bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                {configError}
+              </p>
+            )}
+          </div>
+          <div className="space-y-2 pt-2">
+            <button
+              disabled={isConfiguringAdminDoc}
+              onClick={async () => {
+                try {
+                  setIsConfiguringAdminDoc(true);
+                  setConfigError('');
+                  const userDocRef = doc(db, 'users', firebaseUser.uid);
+                  await setDoc(userDocRef, {
+                    uid: firebaseUser.uid,
+                    name: firebaseUser.displayName || 'Store Administrator',
+                    email: firebaseUser.email || '',
+                    phone: firebaseUser.phoneNumber || '',
+                    role: 'admin',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                  }, { merge: true });
+                  props.onToast('অ্যাডমিন প্রোফাইল সফলভাবে কনফিগার করা হয়েছে!', 'success');
+                } catch (e: any) {
+                  logFirestoreError(e, 'users', 'create', 'admin');
+                  setConfigError(e?.message || 'Failed to create admin profile in Firestore.');
+                } finally {
+                  setIsConfiguringAdminDoc(false);
+                }
+              }}
+              className="w-full py-2.5 px-4 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
+            >
+              {isConfiguringAdminDoc ? 'কনফিগার করা হচ্ছে...' : 'Create / Configure Admin Document'}
+            </button>
+            <button
+              onClick={() => logout()}
+              className="w-full py-2 px-4 border border-stone-300 hover:bg-stone-50 text-stone-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Log Out / Switch Account
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Logged in, but Firestore role is NOT admin
+  if (user.role !== 'admin') {
+    return (
+      <div className="min-h-screen bg-stone-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5 border border-stone-200">
+          <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-800 mx-auto flex items-center justify-center font-bold text-2xl">
+            🛑
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-bold text-stone-900 font-serif">অ্যাক্সেস সংরক্ষিত</h2>
+            <p className="text-xs text-rose-700 font-semibold bg-rose-50 p-3 rounded-xl border border-rose-200">
+              এই অ্যাকাউন্টের Admin permission পাওয়া যায়নি।
+            </p>
+            <p className="text-xs text-stone-500 leading-relaxed">
+              অনুগ্রহ করে অনুমোদিত অ্যাডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।
+            </p>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={() => logout()}
+              className="w-full py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              অনুগ্রহ করে আবার Login করুন
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. Valid Admin: Render full dashboard
   return <AdminDashboardMain {...props} />;
 };
