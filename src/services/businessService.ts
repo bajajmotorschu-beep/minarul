@@ -525,7 +525,20 @@ export const businessService = {
     const supplierRef = input.supplierId ? doc(db, 'suppliers', input.supplierId) : null;
 
     await runTransaction(db, async (tx) => {
-      const productRefs = input.items.map((item) => doc(db, 'products', item.productId));
+      // Deduplicate products to get clean list of unique product IDs and aggregated quantities/costs
+      const productPurchaseMap = new Map<string, { totalQty: number; totalCost: number }>();
+      for (const item of input.items) {
+        const current = productPurchaseMap.get(item.productId) || { totalQty: 0, totalCost: 0 };
+        const qty = Number(item.quantity) || 0;
+        const cost = Number(item.unitCost) || 0;
+        productPurchaseMap.set(item.productId, {
+          totalQty: current.totalQty + qty,
+          totalCost: current.totalCost + (qty * cost),
+        });
+      }
+
+      const uniqueProductIds = Array.from(productPurchaseMap.keys());
+      const productRefs = uniqueProductIds.map((pid) => doc(db, 'products', pid));
       const productSnaps = await Promise.all(productRefs.map((ref) => tx.get(ref)));
       let supplierSnap = null;
       if (supplierRef) {
@@ -534,29 +547,47 @@ export const businessService = {
 
       tx.set(doc(db, 'purchases', id), purchase);
 
-      for (let i = 0; i < input.items.length; i++) {
-        const item = input.items[i];
-        const productSnap = productSnaps[i];
-        if (!productSnap.exists()) continue;
-        const p = productSnap.data();
-        const previousStock = Number(p.stockQuantity ?? p.stock ?? 0);
-        const quantity = Number(item.quantity) || 0;
-        const newStock = previousStock + quantity;
-        const oldCost = Number(p.purchasePrice ?? p.costPrice ?? item.unitCost ?? 0);
-        const unitCost = Number(item.unitCost) || 0;
+      const productSnapMap = new Map<string, any>();
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const snap = productSnaps[i];
+        if (snap.exists()) {
+          productSnapMap.set(uniqueProductIds[i], snap.data());
+        }
+      }
+
+      // Update unique products
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const pid = uniqueProductIds[i];
+        const pRef = productRefs[i];
+        const pData = productSnapMap.get(pid);
+        if (!pData) continue;
+
+        const previousStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+        const agg = productPurchaseMap.get(pid) || { totalQty: 0, totalCost: 0 };
+        const newStock = previousStock + agg.totalQty;
+        const oldCost = Number(pData.purchasePrice ?? pData.costPrice ?? 0);
         const newCost =
-          quantity > 0 && newStock > 0
-            ? (previousStock * oldCost + quantity * unitCost) / newStock
+          agg.totalQty > 0 && newStock > 0
+            ? (previousStock * oldCost + agg.totalCost) / newStock
             : oldCost;
 
-        tx.update(productRefs[i], {
+        tx.update(pRef, {
           stock: newStock,
           stockQuantity: newStock,
           purchasePrice: newCost,
           updatedAt: serverTimestamp(),
         });
+      }
 
-        const movementId = `STM-${id}-${item.productId}`;
+      // Record stock movements for each item
+      for (let i = 0; i < input.items.length; i++) {
+        const item = input.items[i];
+        const pData = productSnapMap.get(item.productId);
+        const previousStock = Number(pData?.stockQuantity ?? pData?.stock ?? 0);
+        const quantity = Number(item.quantity) || 0;
+        const unitCost = Number(item.unitCost) || 0;
+        const movementId = `STM-${id}-${item.productId}-${i}`;
+
         tx.set(
           doc(db, 'stockMovements', movementId),
           clean({
@@ -567,7 +598,7 @@ export const businessService = {
             movementType: 'purchase',
             quantity,
             previousStock,
-            newStock,
+            newStock: previousStock + quantity,
             unitCost,
             totalValue: quantity * unitCost,
             referenceType: 'purchase',
@@ -769,8 +800,16 @@ export const businessService = {
       const pur = purSnap.data() as Purchase;
 
       const items = pur.items || [];
-      const productDocRefs = items.map((item) => doc(db, 'products', item.productId));
-      const movementDocRefs = items.map((item) => doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}`));
+      const productQtyMap = new Map<string, number>();
+      for (const item of items) {
+        const qty = Number(item.quantity) || 0;
+        productQtyMap.set(item.productId, (productQtyMap.get(item.productId) || 0) + qty);
+      }
+
+      const uniqueProductIds = Array.from(productQtyMap.keys());
+      const productDocRefs = uniqueProductIds.map((pid) => doc(db, 'products', pid));
+      const movementDocRefs = items.map((item, idx) => doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}-${idx}`));
+      const legacyMovementRefs = items.map((item) => doc(db, 'stockMovements', `STM-${purchaseId}-${item.productId}`));
 
       const dueAmount = Number(pur.dueAmount) || 0;
       const supplierRef = (pur.supplierId && dueAmount > 0) ? doc(db, 'suppliers', pur.supplierId) : null;
@@ -783,59 +822,76 @@ export const businessService = {
       // ALL READS MUST PRECEDE ALL WRITES
       const productSnaps = await Promise.all(productDocRefs.map((ref) => tx.get(ref)));
       const movementSnaps = await Promise.all(movementDocRefs.map((ref) => tx.get(ref)));
+      const legacyMovementSnaps = await Promise.all(legacyMovementRefs.map((ref) => tx.get(ref)));
       const supplierSnap = supplierRef ? await tx.get(supplierRef) : null;
       const spaySnap = await tx.get(spayRef);
       const ctxSnap = await tx.get(ctxRef);
 
-      // 1. Rollback stock for all items
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const pSnap = productSnaps[i];
-        const pRef = productDocRefs[i];
-        const mSnap = movementSnaps[i];
-        const mRef = movementDocRefs[i];
-
-        if (pSnap && pSnap.exists()) {
-          const pData = pSnap.data();
-          const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
-          const rollbackStock = Math.max(0, curStock - (Number(item.quantity) || 0));
-          tx.update(pRef, {
-            stock: rollbackStock,
-            stockQuantity: rollbackStock,
-            updatedAt: serverTimestamp(),
-          });
-
-          // Delete purchase movement if it exists
-          if (mSnap && mSnap.exists()) {
-            tx.delete(mRef);
-          }
-
-          // Log rollback movement
-          const stmId = `STM-DEL-${purchaseId}-${item.productId}`;
-          tx.set(
-            doc(db, 'stockMovements', stmId),
-            clean({
-              movementId: stmId,
-              productId: item.productId,
-              productName: item.productName,
-              type: 'PURCHASE_RETURN',
-              movementType: 'purchase_return',
-              quantity: -(Number(item.quantity) || 0),
-              previousStock: curStock,
-              newStock: rollbackStock,
-              unitCost: Number(item.unitCost) || 0,
-              totalValue: (Number(item.quantity) || 0) * (Number(item.unitCost) || 0),
-              referenceType: 'purchase_deleted',
-              referenceId: purchaseId,
-              note: `Purchase #${purchaseId} deleted/rolled back`,
-              createdBy: auth.currentUser!.uid,
-              createdAt: serverTimestamp(),
-            })
-          );
+      const productSnapMap = new Map<string, any>();
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const snap = productSnaps[i];
+        if (snap.exists()) {
+          productSnapMap.set(uniqueProductIds[i], snap.data());
         }
       }
 
-      // 2. Rollback supplier due
+      // 1. Rollback stock for unique products
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const pid = uniqueProductIds[i];
+        const pRef = productDocRefs[i];
+        const pData = productSnapMap.get(pid);
+        if (!pData) continue;
+
+        const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+        const rollbackQty = productQtyMap.get(pid) || 0;
+        const rollbackStock = Math.max(0, curStock - rollbackQty);
+
+        tx.update(pRef, {
+          stock: rollbackStock,
+          stockQuantity: rollbackStock,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      // 2. Clean up movement docs and log rollback movement
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const pData = productSnapMap.get(item.productId);
+        const curStock = Number(pData?.stockQuantity ?? pData?.stock ?? 0);
+        const qty = Number(item.quantity) || 0;
+        const rollbackStock = Math.max(0, curStock - (productQtyMap.get(item.productId) || qty));
+
+        if (movementSnaps[i]?.exists()) {
+          tx.delete(movementDocRefs[i]);
+        }
+        if (legacyMovementSnaps[i]?.exists()) {
+          tx.delete(legacyMovementRefs[i]);
+        }
+
+        const stmId = `STM-DEL-${purchaseId}-${item.productId}-${i}`;
+        tx.set(
+          doc(db, 'stockMovements', stmId),
+          clean({
+            movementId: stmId,
+            productId: item.productId,
+            productName: item.productName,
+            type: 'PURCHASE_RETURN',
+            movementType: 'purchase_return',
+            quantity: -qty,
+            previousStock: curStock,
+            newStock: rollbackStock,
+            unitCost: Number(item.unitCost) || 0,
+            totalValue: qty * (Number(item.unitCost) || 0),
+            referenceType: 'purchase_deleted',
+            referenceId: purchaseId,
+            note: `Purchase #${purchaseId} deleted/rolled back`,
+            createdBy: auth.currentUser!.uid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      }
+
+      // 3. Rollback supplier due
       if (supplierRef && supplierSnap && supplierSnap.exists() && dueAmount > 0) {
         const curDue = Number(supplierSnap.data().currentDue ?? supplierSnap.data().openingDue ?? 0);
         tx.update(supplierRef, {
@@ -844,7 +900,7 @@ export const businessService = {
         });
       }
 
-      // 3. Rollback paid amount if paid
+      // 4. Rollback paid amount if paid
       if (spaySnap.exists()) {
         tx.delete(spayRef);
       }
@@ -853,7 +909,7 @@ export const businessService = {
         tx.delete(ctxRef);
       }
 
-      // 4. Delete purchase document
+      // 5. Delete purchase document
       tx.delete(purRef);
     });
   },
@@ -865,7 +921,7 @@ export const businessService = {
     productId: string;
     productName: string;
     sku?: string;
-    adjustmentType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'LOST' | 'MANUAL_CORRECTION';
+    adjustmentType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'LOST' | 'MANUAL_CORRECTION' | 'OPENING_STOCK';
     quantity: number;
     reason: string;
     note?: string;
@@ -884,9 +940,15 @@ export const businessService = {
       // Determine sign based on adjustment type
       let delta = Math.abs(Number(input.quantity) || 0);
       if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(input.adjustmentType)) {
+        if (delta > previousStock) {
+          throw new Error('পর্যাপ্ত Stock নেই');
+        }
         delta = -delta;
       }
-      const newStock = Math.max(0, previousStock + delta);
+      const newStock = previousStock + delta;
+      if (newStock < 0) {
+        throw new Error('পর্যাপ্ত Stock নেই');
+      }
       const totalValue = Math.abs(delta) * unitCost;
 
       // Update product
@@ -978,7 +1040,10 @@ export const businessService = {
       }
 
       const netChange = newDelta - oldDelta;
-      const newStock = Math.max(0, curStock + netChange);
+      const newStock = curStock + netChange;
+      if (newStock < 0) {
+        throw new Error('পর্যাপ্ত Stock নেই');
+      }
 
       tx.update(pRef, {
         stock: newStock,
@@ -1026,7 +1091,10 @@ export const businessService = {
 
       if (pSnap.exists()) {
         const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
-        const rollbackStock = Math.max(0, curStock - (Number(adj.quantity) || 0));
+        const rollbackStock = curStock - (Number(adj.quantity) || 0);
+        if (rollbackStock < 0) {
+          throw new Error('পর্যাপ্ত Stock নেই');
+        }
         tx.update(pRef, {
           stock: rollbackStock,
           stockQuantity: rollbackStock,
@@ -1054,25 +1122,43 @@ export const businessService = {
       const existing = await tx.get(saleRef);
       if (existing.exists()) return; // Prevent duplicate processing
 
-      const productRefs = order.items.map((item) => doc(db, 'products', item.productId));
+      // Deduplicate products to get clean list of unique product IDs and aggregated quantities
+      const productQtyMap = new Map<string, number>();
+      for (const item of order.items) {
+        const qty = Number(item.quantity) || 0;
+        productQtyMap.set(item.productId, (productQtyMap.get(item.productId) || 0) + qty);
+      }
+
+      const uniqueProductIds = Array.from(productQtyMap.keys());
+      const productRefs = uniqueProductIds.map((pid) => doc(db, 'products', pid));
       const productSnaps = await Promise.all(productRefs.map((ref) => tx.get(ref)));
+
+      const productSnapMap = new Map<string, any>();
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const snap = productSnaps[i];
+        if (snap.exists()) {
+          productSnapMap.set(uniqueProductIds[i], snap.data());
+        }
+      }
+
+      // Check stock availability for all unique items
+      for (const [pid, totalQty] of productQtyMap.entries()) {
+        const pData = productSnapMap.get(pid);
+        const currentStock = Number(pData?.stockQuantity ?? pData?.stock ?? 0);
+        if (currentStock < totalQty) {
+          throw new Error('পর্যাপ্ত Stock নেই');
+        }
+      }
+
       const saleItems: any[] = [];
       let totalCost = 0;
-      const updates: any[] = [];
 
-      for (let i = 0; i < order.items.length; i++) {
-        const item = order.items[i];
-        const snap = productSnaps[i];
-        const p: any = snap && snap.exists() ? snap.data() : {};
-        const currentStock = Number(p.stockQuantity ?? p.stock ?? 0);
-        const quantity = Number(item.quantity) || 0;
-        if (currentStock < quantity) {
-          throw new Error(`INSUFFICIENT_STOCK:${item.titleEn || item.titleBn || item.productId}`);
-        }
+      for (const item of order.items) {
+        const p = productSnapMap.get(item.productId) || {};
         const costPrice = Number(p.purchasePrice ?? p.costPrice ?? item.price ?? 0);
+        const quantity = Number(item.quantity) || 0;
         const itemSales = Number(item.price) * quantity;
         const itemCost = costPrice * quantity;
-        const newStock = Math.max(0, currentStock - quantity);
         totalCost += itemCost;
 
         saleItems.push({
@@ -1084,33 +1170,49 @@ export const businessService = {
           totalSelling: itemSales,
           totalCost: itemCost,
         });
-
-        updates.push({ ref: productRefs[i], newStock, item, currentStock, quantity, costPrice });
       }
 
-      for (const u of updates) {
-        tx.update(u.ref, {
-          stock: u.newStock,
-          stockQuantity: u.newStock,
+      // 1. Update product stocks (each unique product updated once)
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const pid = uniqueProductIds[i];
+        const pRef = productRefs[i];
+        const pData = productSnapMap.get(pid) || {};
+        const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+        const deductQty = productQtyMap.get(pid) || 0;
+        const newStock = Math.max(0, curStock - deductQty);
+
+        tx.update(pRef, {
+          stock: newStock,
+          stockQuantity: newStock,
           updatedAt: serverTimestamp(),
         });
+      }
 
-        const movementId = `STM-${order.id}-${u.item.productId}`;
+      // 2. Create stock movement for each item with unique ID
+      for (let idx = 0; idx < order.items.length; idx++) {
+        const item = order.items[idx];
+        const p = productSnapMap.get(item.productId) || {};
+        const costPrice = Number(p.purchasePrice ?? p.costPrice ?? item.price ?? 0);
+        const quantity = Number(item.quantity) || 0;
+        const curStock = Number(p.stockQuantity ?? p.stock ?? 0);
+        const movementId = `STM-${order.id}-${item.productId}-${idx}`;
+
         tx.set(
           doc(db, 'stockMovements', movementId),
           clean({
             movementId,
-            productId: u.item.productId,
-            productName: u.item.titleEn || u.item.titleBn || u.item.productName || '',
+            productId: item.productId,
+            productName: item.titleEn || item.titleBn || item.productName || '',
             type: 'SALE',
             movementType: 'sale',
-            quantity: -u.quantity,
-            previousStock: u.currentStock,
-            newStock: u.newStock,
-            unitCost: u.costPrice,
-            totalValue: u.quantity * u.costPrice,
-            referenceType: 'order',
-            referenceId: order.id,
+            quantity: -quantity,
+            previousStock: curStock,
+            newStock: Math.max(0, curStock - (productQtyMap.get(item.productId) || quantity)),
+            unitCost: costPrice,
+            totalValue: quantity * costPrice,
+            referenceType: 'sale',
+            referenceId: saleId,
+            orderId: order.id,
             note: `Confirmed customer sale #${order.id}`,
             createdBy: auth.currentUser!.uid,
             createdAt: serverTimestamp(),
@@ -1198,45 +1300,66 @@ export const businessService = {
       const sale = saleSnap.data() as Sale;
 
       const items = sale.items || [];
-      const productDocRefs = items.map((item) => doc(db, 'products', item.productId));
-      const movementDocRefs = items.map((item) => doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}`));
+      const productQtyMap = new Map<string, number>();
+      for (const item of items) {
+        const qty = Number(item.quantity) || 0;
+        productQtyMap.set(item.productId, (productQtyMap.get(item.productId) || 0) + qty);
+      }
+
+      const uniqueProductIds = Array.from(productQtyMap.keys());
+      const productDocRefs = uniqueProductIds.map((pid) => doc(db, 'products', pid));
+      const movementDocRefs = items.map((item, idx) => doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}-${idx}`));
+      const legacyMovementRefs = items.map((item) => doc(db, 'stockMovements', `STM-${sale.orderId}-${item.productId}`));
       const ctxRef = doc(db, 'cashTransactions', `CTX-SALE-${sale.orderId}`);
 
       // ALL READS MUST PRECEDE ALL WRITES
       const productSnaps = await Promise.all(productDocRefs.map((ref) => tx.get(ref)));
       const movementSnaps = await Promise.all(movementDocRefs.map((ref) => tx.get(ref)));
+      const legacyMovementSnaps = await Promise.all(legacyMovementRefs.map((ref) => tx.get(ref)));
       const ctxSnap = await tx.get(ctxRef);
 
-      // 1. Restore stock
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const pSnap = productSnaps[i];
-        const pRef = productDocRefs[i];
-        const mSnap = movementSnaps[i];
-        const mRef = movementDocRefs[i];
-
-        if (pSnap && pSnap.exists()) {
-          const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
-          const restoredStock = curStock + (Number(item.quantity) || 0);
-          tx.update(pRef, {
-            stock: restoredStock,
-            stockQuantity: restoredStock,
-            updatedAt: serverTimestamp(),
-          });
-
-          // Delete sale stock movement
-          if (mSnap && mSnap.exists()) {
-            tx.delete(mRef);
-          }
+      const productSnapMap = new Map<string, any>();
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const snap = productSnaps[i];
+        if (snap.exists()) {
+          productSnapMap.set(uniqueProductIds[i], snap.data());
         }
       }
 
-      // 2. Delete linked cash transaction if any
+      // 1. Restore stock for unique products
+      for (let i = 0; i < uniqueProductIds.length; i++) {
+        const pid = uniqueProductIds[i];
+        const pRef = productDocRefs[i];
+        const pData = productSnapMap.get(pid);
+        if (!pData) continue;
+
+        const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+        const restoreQty = productQtyMap.get(pid) || 0;
+        const restoredStock = curStock + restoreQty;
+
+        tx.update(pRef, {
+          stock: restoredStock,
+          stockQuantity: restoredStock,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      // 2. Delete sale stock movements
+      for (let i = 0; i < items.length; i++) {
+        if (movementSnaps[i]?.exists()) {
+          tx.delete(movementDocRefs[i]);
+        }
+        if (legacyMovementSnaps[i]?.exists()) {
+          tx.delete(legacyMovementRefs[i]);
+        }
+      }
+
+      // 3. Delete linked cash transaction if any
       if (ctxSnap.exists()) {
         tx.delete(ctxRef);
       }
 
-      // 3. Delete sale
+      // 4. Delete sale
       tx.delete(saleRef);
     });
   },

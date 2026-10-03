@@ -234,6 +234,7 @@ export type StockMovementType =
   | 'DAMAGE'
   | 'LOST'
   | 'MANUAL_CORRECTION'
+  | 'OPENING_STOCK'
   | string;
 
 export interface StockMovement {
@@ -261,7 +262,7 @@ export interface StockAdjustment {
   productId: string;
   productName: string;
   sku?: string;
-  adjustmentType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'LOST' | 'MANUAL_CORRECTION';
+  adjustmentType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'LOST' | 'MANUAL_CORRECTION' | 'OPENING_STOCK';
   quantity: number;
   previousStock: number;
   newStock: number;

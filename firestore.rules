@@ -11,13 +11,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Hardcoded / bootstrapped admin emails for initial setup and guaranteed access
+    // Authorized admin accounts for initial setup and guaranteed bootstrap access
     function isAuthorizedAdminAccount() {
       return isSignedIn()
         && request.auth.token.email != null
         && (
-          request.auth.token.email == "bajajmotors.chu@gmail.com"
-          || request.auth.token.email == "admin@minarulfashion.com"
+          request.auth.token.email.lower() == "bajajmotors.chu@gmail.com"
+          || request.auth.token.email.lower() == "admin@minarulfashion.com"
         );
     }
 
