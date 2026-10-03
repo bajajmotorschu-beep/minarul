@@ -26,6 +26,7 @@ import { Product, StockMovement, StockAdjustment, StockMovementType, Order } fro
 import { businessService } from '../../services/businessService';
 import { exportToCSV, printSection } from '../../utils/exportUtils';
 import { useLanguage } from '../../context/LanguageContext';
+import { auth } from '../../firebase';
 
 interface StockManagementProps {
   products: Product[];
@@ -243,6 +244,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   // Submit Stock Adjustment
   const handleSaveAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adjSaving) return; // Prevent duplicate submission
     if (!selectedProduct) return;
     if (!adjReason.trim()) {
       onToast(language === 'bn' ? 'অ্যাডজাস্টমেন্টের কারণ উল্লেখ করুন' : 'Please provide an adjustment reason', 'error');
@@ -270,8 +272,21 @@ export const StockManagement: React.FC<StockManagementProps> = ({
       await loadData();
       if (onRefreshProducts) onRefreshProducts();
     } catch (err: any) {
-      console.error('Stock adjustment error:', err);
-      onToast(err?.message || 'Stock adjustment failed', 'error');
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code || 'error',
+        message: err?.message,
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
+        productDocPath: selectedProduct ? `products/${selectedProduct.id}` : null,
+        stockMovementCollection: 'stockMovements',
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      if (err?.message?.includes('Admin user document is missing')) {
+        onToast(language === 'bn' ? 'অ্যাডমিন ইউজার ডকুমেন্ট পাওয়া যায়নি (users/{uid})। অনুগ্রহ করে অ্যাডমিন অ্যাকাউন্ট চেক করুন।' : 'Admin user document is missing in Firestore. Please ensure your admin profile in users/{uid} has role: admin.', 'error');
+      } else {
+        onToast(err?.message || 'Stock adjustment failed', 'error');
+      }
     } finally {
       setAdjSaving(false);
     }
@@ -288,6 +303,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
   // Handle Update Adjustment
   const handleUpdateAdj = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (editAdjSaving) return;
     if (!editingAdj) return;
     setEditAdjSaving(true);
     try {
@@ -301,7 +317,12 @@ export const StockManagement: React.FC<StockManagementProps> = ({
       await loadData();
       if (onRefreshProducts) onRefreshProducts();
     } catch (err: any) {
-      console.error(err);
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code,
+        message: err?.message,
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+      });
       onToast(err?.message || 'Failed to update adjustment', 'error');
     } finally {
       setEditAdjSaving(false);
@@ -310,6 +331,7 @@ export const StockManagement: React.FC<StockManagementProps> = ({
 
   // Handle Delete Adjustment
   const handleDeleteAdj = async () => {
+    if (deletingAdjLoading) return;
     if (!deletingAdj) return;
     setDeletingAdjLoading(true);
     try {
@@ -319,7 +341,12 @@ export const StockManagement: React.FC<StockManagementProps> = ({
       await loadData();
       if (onRefreshProducts) onRefreshProducts();
     } catch (err: any) {
-      console.error(err);
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code,
+        message: err?.message,
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+      });
       onToast(err?.message || 'Failed to delete adjustment', 'error');
     } finally {
       setDeletingAdjLoading(false);

@@ -65,7 +65,7 @@ import {
   OpeningBalances
 } from '../../types';
 import { app, db, auth } from '../../firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { logFirestoreError } from '../../utils/firestoreError';
 import { isAdminEmail } from '../../context/AuthContext';
 import { bangladeshDivisions, allBangladeshDistricts, normalizeDistrictName, FlatDistrict } from '../../data/bangladeshLocations';
@@ -3948,7 +3948,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = (props) => {
               অনুগ্রহ করে অনুমোদিত অ্যাডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।
             </p>
           </div>
-          <div className="pt-2">
+          <div className="space-y-2 pt-2">
+            {isAdminEmail(firebaseUser.email) && (
+              <button
+                disabled={isConfiguringAdminDoc}
+                onClick={async () => {
+                  try {
+                    setIsConfiguringAdminDoc(true);
+                    const userDocRef = doc(db, 'users', firebaseUser.uid);
+                    await updateDoc(userDocRef, {
+                      role: 'admin',
+                      updatedAt: serverTimestamp(),
+                    });
+                    props.onToast('অ্যাডমিন রোল সফলভাবে আপডেট হয়েছে!', 'success');
+                  } catch (e: any) {
+                    logFirestoreError(e, 'users', 'update', 'admin');
+                    props.onToast(e?.message || 'Failed to update admin role in Firestore.', 'error');
+                  } finally {
+                    setIsConfiguringAdminDoc(false);
+                  }
+                }}
+                className="w-full py-2.5 px-4 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isConfiguringAdminDoc ? 'আপডেট করা হচ্ছে...' : 'Firestore-এ অ্যাডমিন রোল সেট করুন (Set role: admin)'}
+              </button>
+            )}
             <button
               onClick={() => logout()}
               className="w-full py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"

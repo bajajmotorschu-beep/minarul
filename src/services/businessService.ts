@@ -917,6 +917,47 @@ export const businessService = {
   // =========================================================================
   // 7. STOCK ADJUSTMENT
   // =========================================================================
+  async verifyAdminUser(operationName: string) {
+    if (!auth.currentUser) {
+      throw new Error('USER_NOT_AUTHENTICATED');
+    }
+    const currentUid = auth.currentUser.uid;
+    const currentEmail = auth.currentUser.email || '';
+    const userDocRef = doc(db, 'users', currentUid);
+    const userSnap = await getDoc(userDocRef);
+
+    if (!userSnap.exists()) {
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: 'permission-denied/admin-doc-missing',
+        message: 'Admin user document is missing.',
+        uid: currentUid,
+        email: currentEmail,
+        userDocPath: `users/${currentUid}`,
+        userRole: null,
+        operation: operationName,
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      throw new Error('Admin user document is missing.');
+    }
+
+    const userData = userSnap.data();
+    if (userData?.role !== 'admin') {
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: 'permission-denied/insufficient-role',
+        message: `User role is "${userData?.role || 'customer'}", but "admin" is required.`,
+        uid: currentUid,
+        email: currentEmail,
+        userDocPath: `users/${currentUid}`,
+        userRole: userData?.role,
+        operation: operationName,
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      throw new Error('Missing or insufficient permissions: User role in Firestore is not "admin".');
+    }
+
+    return userData;
+  },
+
   async createStockAdjustment(input: {
     productId: string;
     productName: string;
@@ -926,82 +967,99 @@ export const businessService = {
     reason: string;
     note?: string;
   }) {
-    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const adminData = await this.verifyAdminUser('createStockAdjustment');
     const adjId = `ADJ-${Date.now().toString(36).toUpperCase()}`;
     const productRef = doc(db, 'products', input.productId);
 
-    await runTransaction(db, async (tx) => {
-      const pSnap = await tx.get(productRef);
-      if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
-      const p = pSnap.data();
-      const previousStock = Number(p.stockQuantity ?? p.stock ?? 0);
-      const unitCost = Number(p.purchasePrice ?? p.costPrice ?? 0);
+    try {
+      await runTransaction(db, async (tx) => {
+        // ALL READS MUST PRECEDE ALL WRITES
+        const pSnap = await tx.get(productRef);
+        if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
+        const p = pSnap.data();
+        const previousStock = Number(p.stockQuantity ?? p.stock ?? 0);
+        const unitCost = Number(p.purchasePrice ?? p.costPrice ?? 0);
 
-      // Determine sign based on adjustment type
-      let delta = Math.abs(Number(input.quantity) || 0);
-      if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(input.adjustmentType)) {
-        if (delta > previousStock) {
+        // Determine sign based on adjustment type
+        let delta = Math.abs(Number(input.quantity) || 0);
+        if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(input.adjustmentType)) {
+          if (delta > previousStock) {
+            throw new Error('পর্যাপ্ত Stock নেই');
+          }
+          delta = -delta;
+        }
+        const newStock = previousStock + delta;
+        if (newStock < 0) {
           throw new Error('পর্যাপ্ত Stock নেই');
         }
-        delta = -delta;
-      }
-      const newStock = previousStock + delta;
-      if (newStock < 0) {
-        throw new Error('পর্যাপ্ত Stock নেই');
-      }
-      const totalValue = Math.abs(delta) * unitCost;
+        const totalValue = Math.abs(delta) * unitCost;
 
-      // Update product
-      tx.update(productRef, {
-        stock: newStock,
-        stockQuantity: newStock,
-        updatedAt: serverTimestamp(),
+        // ALL WRITES AFTER READS
+        // 1. Update product
+        tx.update(productRef, {
+          stock: newStock,
+          stockQuantity: newStock,
+          updatedAt: serverTimestamp(),
+        });
+
+        // 2. Save adjustment log
+        tx.set(
+          doc(db, 'stockAdjustments', adjId),
+          clean({
+            adjustmentId: adjId,
+            productId: input.productId,
+            productName: input.productName || p.titleEn || p.titleBn || '',
+            sku: input.sku || p.sku || '',
+            adjustmentType: input.adjustmentType,
+            quantity: delta,
+            previousStock,
+            newStock,
+            unitCost,
+            totalValue,
+            reason: input.reason,
+            note: input.note || '',
+            createdBy: auth.currentUser!.uid,
+            createdAt: serverTimestamp(),
+          })
+        );
+
+        // 3. Create stock movement record
+        const stmId = `STM-${adjId}`;
+        tx.set(
+          doc(db, 'stockMovements', stmId),
+          clean({
+            movementId: stmId,
+            productId: input.productId,
+            productName: input.productName || p.titleEn || p.titleBn || '',
+            type: input.adjustmentType,
+            movementType: input.adjustmentType.toLowerCase(),
+            quantity: delta,
+            previousStock,
+            newStock,
+            unitCost,
+            totalValue,
+            referenceType: 'adjustment',
+            referenceId: adjId,
+            note: `${input.adjustmentType}: ${input.reason}`,
+            createdBy: auth.currentUser!.uid,
+            createdAt: serverTimestamp(),
+          })
+        );
       });
-
-      // Save adjustment log
-      tx.set(
-        doc(db, 'stockAdjustments', adjId),
-        clean({
-          adjustmentId: adjId,
-          productId: input.productId,
-          productName: input.productName || p.titleEn || p.titleBn || '',
-          sku: input.sku || p.sku || '',
-          adjustmentType: input.adjustmentType,
-          quantity: delta,
-          previousStock,
-          newStock,
-          unitCost,
-          totalValue,
-          reason: input.reason,
-          note: input.note || '',
-          createdBy: auth.currentUser!.uid,
-          createdAt: serverTimestamp(),
-        })
-      );
-
-      // Create stock movement record
-      const stmId = `STM-${adjId}`;
-      tx.set(
-        doc(db, 'stockMovements', stmId),
-        clean({
-          movementId: stmId,
-          productId: input.productId,
-          productName: input.productName || p.titleEn || p.titleBn || '',
-          type: input.adjustmentType,
-          movementType: input.adjustmentType.toLowerCase(),
-          quantity: delta,
-          previousStock,
-          newStock,
-          unitCost,
-          totalValue,
-          referenceType: 'adjustment',
-          referenceId: adjId,
-          note: `${input.adjustmentType}: ${input.reason}`,
-          createdBy: auth.currentUser!.uid,
-          createdAt: serverTimestamp(),
-        })
-      );
-    });
+    } catch (err: any) {
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code || 'unknown',
+        message: err?.message || 'Stock adjustment failed',
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
+        userRole: adminData?.role || 'admin',
+        productDocPath: `products/${input.productId}`,
+        stockMovementPath: `stockMovements/STM-${adjId}`,
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      throw err;
+    }
   },
 
   async updateStockAdjustment(
@@ -1013,101 +1071,129 @@ export const businessService = {
       adjustmentType?: string;
     }
   ) {
-    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const adminData = await this.verifyAdminUser('updateStockAdjustment');
     const adjRef = doc(db, 'stockAdjustments', adjustmentId);
 
-    await runTransaction(db, async (tx) => {
-      const adjSnap = await tx.get(adjRef);
-      if (!adjSnap.exists()) throw new Error('ADJUSTMENT_NOT_FOUND');
-      const oldAdj = adjSnap.data() as StockAdjustment;
+    try {
+      await runTransaction(db, async (tx) => {
+        const adjSnap = await tx.get(adjRef);
+        if (!adjSnap.exists()) throw new Error('ADJUSTMENT_NOT_FOUND');
+        const oldAdj = adjSnap.data() as StockAdjustment;
 
-      const pRef = doc(db, 'products', oldAdj.productId);
-      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+        const pRef = doc(db, 'products', oldAdj.productId);
+        const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
 
-      // ALL READS MUST PRECEDE ALL WRITES
-      const pSnap = await tx.get(pRef);
-      if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
-      const stmSnap = await tx.get(stmRef);
+        // ALL READS MUST PRECEDE ALL WRITES
+        const pSnap = await tx.get(pRef);
+        if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
+        const stmSnap = await tx.get(stmRef);
 
-      const pData = pSnap.data();
-      const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
+        const pData = pSnap.data();
+        const curStock = Number(pData.stockQuantity ?? pData.stock ?? 0);
 
-      const oldDelta = Number(oldAdj.quantity) || 0;
-      const type = input.adjustmentType || oldAdj.adjustmentType;
-      let newDelta = Math.abs(Number(input.quantity) || 0);
-      if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(type)) {
-        newDelta = -newDelta;
-      }
+        const oldDelta = Number(oldAdj.quantity) || 0;
+        const type = input.adjustmentType || oldAdj.adjustmentType;
+        let newDelta = Math.abs(Number(input.quantity) || 0);
+        if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(type)) {
+          newDelta = -newDelta;
+        }
 
-      const netChange = newDelta - oldDelta;
-      const newStock = curStock + netChange;
-      if (newStock < 0) {
-        throw new Error('পর্যাপ্ত Stock নেই');
-      }
+        const netChange = newDelta - oldDelta;
+        const newStock = curStock + netChange;
+        if (newStock < 0) {
+          throw new Error('পর্যাপ্ত Stock নেই');
+        }
 
-      tx.update(pRef, {
-        stock: newStock,
-        stockQuantity: newStock,
-        updatedAt: serverTimestamp(),
-      });
+        tx.update(pRef, {
+          stock: newStock,
+          stockQuantity: newStock,
+          updatedAt: serverTimestamp(),
+        });
 
-      tx.update(adjRef, clean({
-        quantity: newDelta,
-        adjustmentType: type,
-        reason: input.reason,
-        note: input.note || '',
-        newStock,
-        updatedAt: serverTimestamp(),
-      }));
-
-      // Update movement if it exists
-      if (stmSnap.exists()) {
-        tx.update(stmRef, clean({
+        tx.update(adjRef, clean({
           quantity: newDelta,
-          type: type as StockMovementType,
+          adjustmentType: type,
+          reason: input.reason,
+          note: input.note || '',
           newStock,
-          note: `${type}: ${input.reason}`,
           updatedAt: serverTimestamp(),
         }));
-      }
-    });
+
+        // Update movement if it exists
+        if (stmSnap.exists()) {
+          tx.update(stmRef, clean({
+            quantity: newDelta,
+            type: type as StockMovementType,
+            newStock,
+            note: `${type}: ${input.reason}`,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+      });
+    } catch (err: any) {
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code || 'unknown',
+        message: err?.message || 'Stock adjustment update failed',
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
+        userRole: adminData?.role || 'admin',
+        adjustmentId,
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      throw err;
+    }
   },
 
   async deleteStockAdjustment(adjustmentId: string) {
-    if (!auth.currentUser) throw new Error('USER_NOT_AUTHENTICATED');
+    const adminData = await this.verifyAdminUser('deleteStockAdjustment');
     const adjRef = doc(db, 'stockAdjustments', adjustmentId);
 
-    await runTransaction(db, async (tx) => {
-      const adjSnap = await tx.get(adjRef);
-      if (!adjSnap.exists()) return;
-      const adj = adjSnap.data() as StockAdjustment;
+    try {
+      await runTransaction(db, async (tx) => {
+        const adjSnap = await tx.get(adjRef);
+        if (!adjSnap.exists()) return;
+        const adj = adjSnap.data() as StockAdjustment;
 
-      const pRef = doc(db, 'products', adj.productId);
-      const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
+        const pRef = doc(db, 'products', adj.productId);
+        const stmRef = doc(db, 'stockMovements', `STM-${adjustmentId}`);
 
-      // ALL READS MUST PRECEDE ALL WRITES
-      const pSnap = await tx.get(pRef);
-      const stmSnap = await tx.get(stmRef);
+        // ALL READS MUST PRECEDE ALL WRITES
+        const pSnap = await tx.get(pRef);
+        const stmSnap = await tx.get(stmRef);
 
-      if (pSnap.exists()) {
-        const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
-        const rollbackStock = curStock - (Number(adj.quantity) || 0);
-        if (rollbackStock < 0) {
-          throw new Error('পর্যাপ্ত Stock নেই');
+        if (pSnap.exists()) {
+          const curStock = Number(pSnap.data().stockQuantity ?? pSnap.data().stock ?? 0);
+          const rollbackStock = curStock - (Number(adj.quantity) || 0);
+          if (rollbackStock < 0) {
+            throw new Error('পর্যাপ্ত Stock নেই');
+          }
+          tx.update(pRef, {
+            stock: rollbackStock,
+            stockQuantity: rollbackStock,
+            updatedAt: serverTimestamp(),
+          });
         }
-        tx.update(pRef, {
-          stock: rollbackStock,
-          stockQuantity: rollbackStock,
-          updatedAt: serverTimestamp(),
-        });
-      }
 
-      tx.delete(adjRef);
+        tx.delete(adjRef);
 
-      if (stmSnap.exists()) {
-        tx.delete(stmRef);
-      }
-    });
+        if (stmSnap.exists()) {
+          tx.delete(stmRef);
+        }
+      });
+    } catch (err: any) {
+      console.error('STOCK ADJUSTMENT ERROR', {
+        code: err?.code || 'unknown',
+        message: err?.message || 'Stock adjustment delete failed',
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
+        userRole: adminData?.role || 'admin',
+        adjustmentId,
+        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+      });
+      throw err;
+    }
   },
 
   // =========================================================================

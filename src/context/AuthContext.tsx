@@ -141,8 +141,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (userSnap.exists()) {
             const data = userSnap.data();
-            // Source of Truth: data.role === 'admin' strictly from Firestore users/{uid} OR authorized admin
-            const firestoreRole: 'customer' | 'admin' = (data.role === 'admin' || isUserAuthorizedAdmin) ? 'admin' : 'customer';
+            // Source of Truth: data.role === 'admin' strictly from Firestore users/{uid}
+            const firestoreRole: 'customer' | 'admin' = data.role === 'admin' ? 'admin' : 'customer';
 
             console.log('  Verified Firestore Role:', firestoreRole);
 
@@ -162,7 +162,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             unsubscribeUserDoc = onSnapshot(userDocRef, (docSnap) => {
               if (docSnap.exists()) {
                 const liveData = docSnap.data();
-                const liveRole: 'customer' | 'admin' = (liveData.role === 'admin' || isUserAuthorizedAdmin) ? 'admin' : 'customer';
+                const liveRole: 'customer' | 'admin' = liveData.role === 'admin' ? 'admin' : 'customer';
 
                 setUser((prev) => {
                   if (!prev) return null;
@@ -176,36 +176,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   storageService.saveUser(updated);
                   return updated;
                 });
+              } else {
+                console.warn('User document was removed from Firestore!');
+                setUser(null);
+                storageService.saveUser(null);
               }
             }, (error) => {
               console.warn('Real-time user document listener notice:', error.message);
             });
           } else {
-            // Firestore document was not created or inaccessible
-            const fallbackRole: 'customer' | 'admin' = isUserAuthorizedAdmin ? 'admin' : 'customer';
-            const fallbackUser: User = {
-              id: currentFbUser.uid,
-              name: currentFbUser.displayName || (fallbackRole === 'admin' ? 'Store Administrator' : 'Customer'),
-              email: currentFbUser.email || '',
-              phone: currentFbUser.phoneNumber || '',
-              role: fallbackRole,
-            };
-            setUser(fallbackUser);
-            storageService.saveUser(fallbackUser);
+            // Firestore document was not created or does not exist
+            console.error('⚠️ Admin user document is missing in Firestore: users/' + currentFbUser.uid);
+            setUser(null);
+            storageService.saveUser(null);
           }
         } catch (error: any) {
-          const isUserAuthorizedAdmin = isAdminEmail(currentFbUser.email);
-          logFirestoreError(error, 'users', 'read', isUserAuthorizedAdmin ? 'admin' : 'customer');
-          const fallbackRole: 'customer' | 'admin' = isUserAuthorizedAdmin ? 'admin' : 'customer';
-          const fallbackUser: User = {
-            id: currentFbUser.uid,
-            name: currentFbUser.displayName || (fallbackRole === 'admin' ? 'Store Administrator' : 'Customer'),
-            email: currentFbUser.email || '',
-            phone: currentFbUser.phoneNumber || '',
-            role: fallbackRole,
-          };
-          setUser(fallbackUser);
-          storageService.saveUser(fallbackUser);
+          console.error('Error fetching Firestore user document:', error);
+          setUser(null);
+          storageService.saveUser(null);
         } finally {
           setIsLoadingAuth(false);
         }

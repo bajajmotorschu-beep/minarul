@@ -69,7 +69,7 @@ service cloud.firestore {
     // Public can view/search products; Only Admin can add, edit, or delete
     match /products/{productId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // ----------------- ORDERS COLLECTION -----------------
@@ -88,7 +88,7 @@ service cloud.firestore {
     // Public can read to validate coupons at checkout; Only Admin can manage
     match /coupons/{couponId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // ----------------- REVIEWS COLLECTION -----------------
@@ -108,29 +108,35 @@ service cloud.firestore {
     // Public can read site/payment settings; Only Admin can modify settings
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // ----------------- HERO SLIDES COLLECTION -----------------
     // Public can read slides; Only Admin can modify
     match /heroSlides/{slideId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // ----------------- BUSINESS / ACCOUNTING COLLECTIONS -----------------
-    match /purchases/{purchaseId} { allow read, write: if isAdmin(); }
-    match /sales/{saleId} { allow read, write: if isAdmin(); }
-    match /expenses/{expenseId} { allow read, write: if isAdmin(); }
-    match /suppliers/{supplierId} { allow read, write: if isAdmin(); }
-    match /supplierPayments/{paymentId} { allow read, write: if isAdmin(); }
-    match /stockMovements/{movementId} { allow read, write: if isAdmin(); }
-    match /stockAdjustments/{adjustmentId} { allow read, write: if isAdmin(); }
-    match /transactions/{transactionId} { allow read, write: if isAdmin(); }
-    match /cashTransactions/{transactionId} { allow read, write: if isAdmin(); }
-    match /returns/{returnId} { allow read, write: if isAdmin(); }
-    match /payments/{paymentId} { allow read, write: if isAdmin(); }
-    match /accounts/{accountId} { allow read, write: if isAdmin(); }
+    // ----------------- STOCK & INVENTORY COLLECTIONS -----------------
+    match /stockMovements/{movementId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /stockAdjustments/{adjustmentId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    // ----------------- BUSINESS & ACCOUNTING COLLECTIONS -----------------
+    match /purchases/{purchaseId} { allow read, create, update, delete: if isAdmin(); }
+    match /sales/{saleId} { allow read, create, update, delete: if isAdmin(); }
+    match /expenses/{expenseId} { allow read, create, update, delete: if isAdmin(); }
+    match /suppliers/{supplierId} { allow read, create, update, delete: if isAdmin(); }
+    match /supplierPayments/{paymentId} { allow read, create, update, delete: if isAdmin(); }
+    match /transactions/{transactionId} { allow read, create, update, delete: if isAdmin(); }
+    match /cashTransactions/{transactionId} { allow read, create, update, delete: if isAdmin(); }
+    match /returns/{returnId} { allow read, create, update, delete: if isAdmin(); }
+    match /payments/{paymentId} { allow read, create, update, delete: if isAdmin(); }
+    match /accounts/{accountId} { allow read, create, update, delete: if isAdmin(); }
 
     // ----------------- PHONE LOOKUP COLLECTION -----------------
     // Maps normalized phone number to registered user email for Mobile Login
