@@ -106,10 +106,38 @@ export const businessService = {
   async getStockAdjustments(): Promise<StockAdjustment[]> {
     try {
       const snap = await getDocs(query(collection(db, 'stockAdjustments'), orderBy('createdAt', 'desc')));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as StockAdjustment[];
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as StockAdjustment[];
+      }
+    } catch {
+      // Fallback to stockMovements if stockAdjustments has no rule or is not populated
+    }
+
+    // Derive adjustments from stockMovements
+    try {
+      const movements = await this.getStockMovements();
+      return movements
+        .filter((m) => m.referenceType === 'adjustment' || ['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'LOST', 'MANUAL_CORRECTION', 'OPENING_STOCK'].includes(m.type))
+        .map((m) => ({
+          id: m.id || m.movementId,
+          adjustmentId: m.referenceId || m.movementId,
+          productId: m.productId,
+          productName: m.productName,
+          sku: (m as any).sku || '',
+          adjustmentType: m.type as any,
+          quantity: m.quantity,
+          previousStock: m.previousStock,
+          newStock: m.newStock,
+          unitCost: m.unitCost || 0,
+          totalValue: m.totalValue || 0,
+          reason: (m as any).reason || m.note || '',
+          note: m.note || '',
+          createdBy: m.createdBy,
+          createdAt: m.createdAt,
+        })) as StockAdjustment[];
     } catch (err) {
-      logFirestoreError(err, 'stockAdjustments', 'list', 'admin');
-      throw err;
+      logFirestoreError(err, 'stockMovements', 'list', 'admin');
+      return [];
     }
   },
 

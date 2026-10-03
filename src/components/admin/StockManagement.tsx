@@ -282,6 +282,12 @@ export const StockManagement: React.FC<StockManagementProps> = ({
         stockMovementCollection: 'stockMovements',
         collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
       });
+      console.error('STOCK ADJUSTMENT FIRESTORE ERROR', {
+        code: err?.code || 'error',
+        message: err?.message,
+        path: selectedProduct ? `products/${selectedProduct.id}` : 'products',
+        collections: ['products', 'stockAdjustments', 'stockMovements'],
+      });
       if (err?.message?.includes('Admin user document is missing')) {
         onToast(language === 'bn' ? 'অ্যাডমিন ইউজার ডকুমেন্ট পাওয়া যায়নি (users/{uid})। অনুগ্রহ করে অ্যাডমিন অ্যাকাউন্ট চেক করুন।' : 'Admin user document is missing in Firestore. Please ensure your admin profile in users/{uid} has role: admin.', 'error');
       } else {
