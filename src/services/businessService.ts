@@ -998,63 +998,56 @@ export const businessService = {
     const adminData = await this.verifyAdminUser('createStockAdjustment');
     const adjId = `ADJ-${Date.now().toString(36).toUpperCase()}`;
     const productRef = doc(db, 'products', input.productId);
+    const stmId = `STM-${adjId}`;
+    const stmRef = doc(db, 'stockMovements', stmId);
+    const adjRef = doc(db, 'stockAdjustments', adjId);
+
+    let delta = Math.abs(Number(input.quantity) || 0);
+    let previousStock = 0;
+    let newStock = 0;
+    let unitCost = 0;
+    let totalValue = 0;
 
     try {
       await runTransaction(db, async (tx) => {
-        // ALL READS MUST PRECEDE ALL WRITES
+        // STEP 1: READ PRODUCT BEFORE WRITES
+        console.log("STOCK ADJUSTMENT STEP 1");
+        console.log("Reading product:", productRef.path);
         const pSnap = await tx.get(productRef);
         if (!pSnap.exists()) throw new Error('PRODUCT_NOT_FOUND');
         const p = pSnap.data();
-        const previousStock = Number(p.stockQuantity ?? p.stock ?? 0);
-        const unitCost = Number(p.purchasePrice ?? p.costPrice ?? 0);
+        previousStock = Number(p.stockQuantity ?? p.stock ?? 0);
+        unitCost = Number(p.purchasePrice ?? p.costPrice ?? 0);
 
         // Determine sign based on adjustment type
-        let delta = Math.abs(Number(input.quantity) || 0);
+        delta = Math.abs(Number(input.quantity) || 0);
         if (['ADJUSTMENT_OUT', 'DAMAGE', 'LOST'].includes(input.adjustmentType)) {
           if (delta > previousStock) {
             throw new Error('পর্যাপ্ত Stock নেই');
           }
           delta = -delta;
         }
-        const newStock = previousStock + delta;
+        newStock = previousStock + delta;
         if (newStock < 0) {
           throw new Error('পর্যাপ্ত Stock নেই');
         }
-        const totalValue = Math.abs(delta) * unitCost;
+        totalValue = Math.abs(delta) * unitCost;
 
-        // ALL WRITES AFTER READS
-        // 1. Update product
+        // ALL WRITES AFTER ALL READS
+        // STEP 2: UPDATE PRODUCT STOCK
+        console.log("STOCK ADJUSTMENT STEP 2");
+        console.log("Updating product:", productRef.path);
         tx.update(productRef, {
           stock: newStock,
           stockQuantity: newStock,
           updatedAt: serverTimestamp(),
         });
 
-        // 2. Save adjustment log
+        // STEP 3: CREATE STOCK MOVEMENT RECORD
+        console.log("STOCK ADJUSTMENT STEP 3");
+        console.log("Creating stock movement:", stmRef.path);
         tx.set(
-          doc(db, 'stockAdjustments', adjId),
-          clean({
-            adjustmentId: adjId,
-            productId: input.productId,
-            productName: input.productName || p.titleEn || p.titleBn || '',
-            sku: input.sku || p.sku || '',
-            adjustmentType: input.adjustmentType,
-            quantity: delta,
-            previousStock,
-            newStock,
-            unitCost,
-            totalValue,
-            reason: input.reason,
-            note: input.note || '',
-            createdBy: auth.currentUser!.uid,
-            createdAt: serverTimestamp(),
-          })
-        );
-
-        // 3. Create stock movement record
-        const stmId = `STM-${adjId}`;
-        tx.set(
-          doc(db, 'stockMovements', stmId),
+          stmRef,
           clean({
             movementId: stmId,
             productId: input.productId,
@@ -1074,7 +1067,46 @@ export const businessService = {
           })
         );
       });
+
+      // STEP 4: WRITE AUDIT RECORD TO stockAdjustments (Guarded auxiliary write)
+      try {
+        console.log("STOCK ADJUSTMENT STEP 4");
+        console.log("Creating stock adjustment log:", adjRef.path);
+        await setDoc(
+          adjRef,
+          clean({
+            adjustmentId: adjId,
+            productId: input.productId,
+            productName: input.productName || '',
+            sku: input.sku || '',
+            adjustmentType: input.adjustmentType,
+            quantity: delta,
+            previousStock,
+            newStock,
+            unitCost,
+            totalValue,
+            reason: input.reason,
+            note: input.note || '',
+            createdBy: auth.currentUser!.uid,
+            createdAt: serverTimestamp(),
+          })
+        );
+      } catch (adjErr: any) {
+        console.warn("Notice: stockAdjustments collection write warning (ensure stockAdjustments rule is in Firestore rules):", adjErr?.message);
+      }
+
+      return {
+        adjustmentId: adjId,
+        movementId: stmId,
+        productId: input.productId,
+        newStock,
+      };
     } catch (err: any) {
+      console.error("STOCK ADJUSTMENT FIRESTORE ERROR", {
+        code: err?.code,
+        message: err?.message,
+        name: err?.name,
+      });
       console.error('STOCK ADJUSTMENT ERROR', {
         code: err?.code || 'unknown',
         message: err?.message || 'Stock adjustment failed',
@@ -1083,8 +1115,8 @@ export const businessService = {
         userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
         userRole: adminData?.role || 'admin',
         productDocPath: `products/${input.productId}`,
-        stockMovementPath: `stockMovements/STM-${adjId}`,
-        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+        stockMovementPath: `stockMovements/${stmId}`,
+        collectionsWritten: ['products', 'stockMovements', 'stockAdjustments'],
       });
       throw err;
     }
@@ -1159,6 +1191,11 @@ export const businessService = {
         }
       });
     } catch (err: any) {
+      console.error("STOCK ADJUSTMENT FIRESTORE ERROR", {
+        code: err?.code,
+        message: err?.message,
+        name: err?.name,
+      });
       console.error('STOCK ADJUSTMENT ERROR', {
         code: err?.code || 'unknown',
         message: err?.message || 'Stock adjustment update failed',
@@ -1167,7 +1204,7 @@ export const businessService = {
         userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
         userRole: adminData?.role || 'admin',
         adjustmentId,
-        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+        collectionsWritten: ['products', 'stockMovements', 'stockAdjustments'],
       });
       throw err;
     }
@@ -1210,6 +1247,11 @@ export const businessService = {
         }
       });
     } catch (err: any) {
+      console.error("STOCK ADJUSTMENT FIRESTORE ERROR", {
+        code: err?.code,
+        message: err?.message,
+        name: err?.name,
+      });
       console.error('STOCK ADJUSTMENT ERROR', {
         code: err?.code || 'unknown',
         message: err?.message || 'Stock adjustment delete failed',

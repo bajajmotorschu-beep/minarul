@@ -275,18 +275,20 @@ export const StockManagement: React.FC<StockManagementProps> = ({
       console.error('STOCK ADJUSTMENT ERROR', {
         code: err?.code || 'error',
         message: err?.message,
+        name: err?.name,
         uid: auth.currentUser?.uid,
         email: auth.currentUser?.email,
         userDocPath: auth.currentUser ? `users/${auth.currentUser.uid}` : null,
         productDocPath: selectedProduct ? `products/${selectedProduct.id}` : null,
         stockMovementCollection: 'stockMovements',
-        collectionsWritten: ['products', 'stockAdjustments', 'stockMovements'],
+        collectionsWritten: ['products', 'stockMovements', 'stockAdjustments'],
       });
       console.error('STOCK ADJUSTMENT FIRESTORE ERROR', {
         code: err?.code || 'error',
         message: err?.message,
+        name: err?.name,
         path: selectedProduct ? `products/${selectedProduct.id}` : 'products',
-        collections: ['products', 'stockAdjustments', 'stockMovements'],
+        collections: ['products', 'stockMovements', 'stockAdjustments'],
       });
       if (err?.message?.includes('Admin user document is missing')) {
         onToast(language === 'bn' ? 'অ্যাডমিন ইউজার ডকুমেন্ট পাওয়া যায়নি (users/{uid})। অনুগ্রহ করে অ্যাডমিন অ্যাকাউন্ট চেক করুন।' : 'Admin user document is missing in Firestore. Please ensure your admin profile in users/{uid} has role: admin.', 'error');
